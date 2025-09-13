@@ -1,0 +1,52 @@
+# Full-Featured WSL2 Discord Bot with Local AI Models
+# Requirements for Voice, VAD, Pipecat, Parakeet, Phi-3, and Kokoro
+
+# Core Discord and Async
+discord.py[voice]==2.6.3
+aiohttp==3.12.15
+asyncio-contextvar==0.2.2
+
+# Voice Processing and Audio
+sounddevice==0.5.1          # Audio I/O (PyAudio alternative for WSL)
+scipy==1.11.4               # Audio processing
+numpy==1.24.3               # Numerical operations
+librosa==0.10.1             # Advanced audio analysis
+webrtcvad==2.0.10          # Google WebRTC VAD
+silero-vad==4.0.0          # Silero VAD models
+
+# Pipecat Framework
+pipecat-ai[all]==0.0.47
+
+# Speech Recognition (Parakeet + Whisper fallback)
+nemo-toolkit[asr]==1.23.0   # NVIDIA NeMo for Parakeet
+onnxruntime==1.15.0         # ONNX runtime for Parakeet inference
+openai-whisper==20231117    # Whisper fallback
+whisper-jax==0.0.15        # Fast Whisper inference
+
+# Language Models (Phi-3 + API fallbacks)
+transformers==4.36.0        # Hugging Face transformers
+torch==2.1.0               # PyTorch for model inference
+llama-cpp-python==0.2.27   # llama.cpp Python bindings for GGUF
+sentencepiece==0.1.99      # Tokenizer for Phi-3
+
+# Text-to-Speech (Kokoro + fallbacks)  
+torch-audio==2.1.0         # Audio processing for Kokoro
+kokoro-onnx==0.1.0         # Kokoro ONNX runtime (if available)
+espeak-ng==1.0.3           # eSpeak fallback TTS
+pyttsx3==2.90              # System TTS fallback
+
+# API Clients
+openai==1.11.0             # OpenAI API
+anthropic==0.15.0          # Anthropic API
+httpx==0.26.0              # HTTP client
+
+# Utilities
+python-dotenv==1.0.0       # Environment variables
+loguru==0.7.2              # Advanced logging
+typer==0.9.0               # CLI interface
+pydantic==2.5.0            # Data validation
+uvloop==0.19.0             # Fast event loop for Linux
+
+# Development and Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1

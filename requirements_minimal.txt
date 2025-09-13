@@ -1,0 +1,37 @@
+# Minimal requirements for Discord AI Assistant Backend
+
+# Core Framework
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+
+# File System Operations
+watchdog
+aiofiles
+
+# LLM and AI
+langchain
+langchain-community
+langchain-openai
+langchain-anthropic
+openai
+anthropic
+
+# Data Processing
+pydantic
+pydantic-settings
+python-dotenv
+
+# Utilities
+click
+rich
+httpx
+psutil
+
+# Logging
+loguru
+
+# For testing
+pytest
+pytest-asyncio

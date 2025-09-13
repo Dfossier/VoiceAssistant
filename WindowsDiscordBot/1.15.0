@@ -1,0 +1,30 @@
+Collecting onnxruntime
+  Downloading onnxruntime-1.22.1-cp312-cp312-win_amd64.whl.metadata (5.1 kB)
+Collecting coloredlogs (from onnxruntime)
+  Using cached coloredlogs-15.0.1-py2.py3-none-any.whl.metadata (12 kB)
+Collecting flatbuffers (from onnxruntime)
+  Using cached flatbuffers-25.2.10-py2.py3-none-any.whl.metadata (875 bytes)
+Requirement already satisfied: numpy>=1.21.6 in c:\users\dfoss\desktop\localaimodels\assistant\windowsdiscordbot\venv\lib\site-packages (from onnxruntime) (1.26.4)
+Collecting packaging (from onnxruntime)
+  Using cached packaging-25.0-py3-none-any.whl.metadata (3.3 kB)
+Requirement already satisfied: protobuf in c:\users\dfoss\desktop\localaimodels\assistant\windowsdiscordbot\venv\lib\site-packages (from onnxruntime) (5.29.5)
+Collecting sympy (from onnxruntime)
+  Using cached sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime)
+  Using cached humanfriendly-10.0-py2.py3-none-any.whl.metadata (9.2 kB)
+Collecting pyreadline3 (from humanfriendly>=9.1->coloredlogs->onnxruntime)
+  Using cached pyreadline3-3.5.4-py3-none-any.whl.metadata (4.7 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy->onnxruntime)
+  Using cached mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Downloading onnxruntime-1.22.1-cp312-cp312-win_amd64.whl (12.7 MB)
+   ---------------------------------------- 12.7/12.7 MB 41.8 MB/s  0:00:00
+Using cached coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+Using cached humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+Using cached flatbuffers-25.2.10-py2.py3-none-any.whl (30 kB)
+Using cached packaging-25.0-py3-none-any.whl (66 kB)
+Using cached pyreadline3-3.5.4-py3-none-any.whl (83 kB)
+Using cached sympy-1.14.0-py3-none-any.whl (6.3 MB)
+Using cached mpmath-1.3.0-py3-none-any.whl (536 kB)
+Installing collected packages: mpmath, flatbuffers, sympy, pyreadline3, packaging, humanfriendly, coloredlogs, onnxruntime
+
+Successfully installed coloredlogs-15.0.1 flatbuffers-25.2.10 humanfriendly-10.0 mpmath-1.3.0 onnxruntime-1.22.1 packaging-25.0 pyreadline3-3.5.4 sympy-1.14.0

@@ -1,0 +1,17 @@
+# WSL-Compatible Voice Requirements (no PyAudio needed)
+
+# Web-based Speech Recognition (works in browser)
+# No additional Python packages needed - uses Web Speech API
+
+# Text-to-Speech for WSL
+pyttsx3==2.99  # Local TTS that works in WSL
+
+# Pipecat framework (optional, for advanced features)
+pipecat-ai>=0.0.30
+
+# Audio processing (PyAudio alternative for WSL)
+sounddevice==0.5.1  # Works better in WSL than PyAudio
+scipy==1.11.4      # For audio processing
+
+# WebRTC support (for browser-based voice chat)
+aiortc==1.8.0  # Pure Python WebRTC implementation

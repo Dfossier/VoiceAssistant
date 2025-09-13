@@ -1,0 +1,1 @@
+"""Utility modules for Local AI Assistant"""

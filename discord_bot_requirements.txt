@@ -1,0 +1,13 @@
+# Discord Bot Requirements
+
+# Discord
+discord.py>=2.3.0
+
+# HTTP Client
+httpx>=0.25.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Optional: For voice support with Pipecat
+pipecat-ai[discord,whisper,openai]>=0.0.47  # Optional

@@ -1,0 +1,88 @@
+# Environment and credentials
+.env
+*.env
+gitpassword.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+venv_*/
+bot_venv_windows/
+venv_wsl/
+
+# Logs and temporary files
+*.log
+*.pid
+temp/
+cache/
+data/
+
+# Audio test files
+*.wav
+*.mp3
+*.m4a
+
+# Archive directory (debugging artifacts)
+archive/
+
+# Static files (unless needed)
+static/uploads/
+static/vendor/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Model files (large)
+*.pth
+*.pt
+*.onnx
+*.gguf
+*.nemo
+*.bin
+models/
+
+# Windows specific
+*.lnk
+desktop.ini
+~$*
+
+# Test outputs
+test_*.wav
+debug_*.wav
+websocket_*.wav
+kokoro_*.wav

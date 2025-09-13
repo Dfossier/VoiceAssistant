@@ -1,0 +1,80 @@
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+websockets==12.0
+python-multipart==0.0.6
+
+# Discord & Pipecat Integration
+pipecat-ai[discord,whisper,openai]==0.0.47
+discord.py==2.3.2
+
+# Windows Automation (Windows-specific) - Optional for future use
+pywinauto==0.6.8; sys_platform == 'win32'
+pywin32==306; sys_platform == 'win32'
+wexpect==4.0.0; sys_platform == 'win32'
+
+# File System Operations
+watchdog==3.0.0
+aiofiles==23.2.1
+
+# Web Automation
+playwright==1.41.0
+
+# LLM and AI
+langchain==0.1.6
+langchain-community==0.0.20
+langchain-openai==0.0.5
+langchain-anthropic==0.0.2
+openai==1.11.0
+anthropic==0.15.0
+chromadb==0.4.22
+tiktoken==0.5.2
+
+# Database
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# Async and Concurrency
+asyncio==3.4.3
+aiohttp>=3.10.0
+
+# Data Processing
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+pyyaml==6.0.1
+orjson==3.9.12
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==42.0.0
+
+# Utilities
+click==8.1.7
+rich==13.7.0
+httpx==0.26.0
+psutil==5.9.8
+
+# Development Tools
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+ruff==0.1.14
+mypy==1.8.0
+black==23.12.1
+
+# Logging and Monitoring
+loguru==0.7.2
+python-json-logger==2.0.7
+
+# Image Processing (for screenshots)
+Pillow==10.2.0
+opencv-python==4.9.0.80
+
+# Windows-WSL Communication
+pyzmq==25.1.2
+
+# Performance Monitoring
+memory-profiler==0.61.0
+py-spy==0.3.14
