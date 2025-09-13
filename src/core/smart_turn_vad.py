@@ -49,29 +49,39 @@ class SmartTurnVAD:
         logger.info(f"   Sample rate: {sample_rate}Hz")
 
     async def initialize(self) -> bool:
-        """Initialize Smart Turn model"""
+        """Initialize Smart Turn model (standalone version)"""
         if self.is_initialized:
             return True
             
         try:
-            logger.info("🔄 Loading Smart Turn v3 model...")
+            logger.info("🔄 Loading Smart Turn v3 model (standalone)...")
             
-            # Import Smart Turn analyzer
-            from pipecat.analyzers.smart_turn import LocalSmartTurnAnalyzerV3
-            
-            # Initialize analyzer
-            self.analyzer = LocalSmartTurnAnalyzerV3()
+            # Import standalone Smart Turn analyzer
+            try:
+                from .standalone_smart_turn import smart_turn_model
+                self.analyzer = smart_turn_model
+                
+                # Initialize the model
+                if not self.analyzer.initialize():
+                    self.initialization_error = "Standalone Smart Turn initialization failed"
+                    return False
+                    
+            except ImportError:
+                logger.error("❌ Standalone Smart Turn not found")
+                logger.info("💡 Run: python install_smart_turn.py")
+                self.initialization_error = "Standalone Smart Turn not installed"
+                return False
             
             # Test with dummy audio to ensure it works
             test_audio = np.zeros(int(self.sample_rate * 0.1), dtype=np.int16).tobytes()  # 100ms silence
             start_time = time.time()
             
             try:
-                test_result = await self.analyzer.analyze(test_audio)
+                test_result = self.analyzer.analyze(test_audio)
                 init_time = (time.time() - start_time) * 1000
                 
                 self.is_initialized = True
-                logger.info(f"✅ Smart Turn v3 loaded successfully")
+                logger.info(f"✅ Smart Turn v3 (standalone) loaded successfully")
                 logger.info(f"   Initialization test: {init_time:.1f}ms")
                 logger.info(f"   Test result: {test_result}")
                 
@@ -82,13 +92,6 @@ class SmartTurnVAD:
                 self.initialization_error = f"Test inference failed: {test_error}"
                 return False
                 
-        except ImportError as e:
-            error_msg = f"Smart Turn import failed: {e}"
-            logger.error(f"❌ {error_msg}")
-            logger.info("💡 Install with: pip install 'pipecat-ai[local-smart-turn-v3]==0.0.85'")
-            self.initialization_error = error_msg
-            return False
-            
         except Exception as e:
             error_msg = f"Smart Turn initialization failed: {e}"
             logger.error(f"❌ {error_msg}")
@@ -151,8 +154,8 @@ class SmartTurnVAD:
             start_time = time.time()
             audio_bytes = bytes(self.audio_buffer)
             
-            # Smart Turn inference
-            result = await self.analyzer.analyze(audio_bytes)
+            # Smart Turn inference (standalone version is synchronous)
+            result = self.analyzer.analyze(audio_bytes)
             
             inference_time = (time.time() - start_time) * 1000  # ms
             self.inference_times.append(inference_time)
@@ -195,21 +198,24 @@ class SmartTurnVAD:
 
     def _parse_turn_result(self, result: Any) -> bool:
         """Parse Smart Turn result to determine if turn ended"""
-        # Smart Turn v3 result format may vary - adapt based on actual implementation
         if result is None:
             return False
             
-        # Common patterns for turn detection results:
-        if isinstance(result, bool):
-            return result
+        # Smart Turn v3 returns dict with 'prediction' (0/1) and 'probability' (0.0-1.0)
+        if isinstance(result, dict):
+            # Check for actual Smart Turn v3 format
+            if 'prediction' in result:
+                return bool(result['prediction'])
+            # Fallback patterns
+            return result.get('turn_ended', result.get('is_complete', False))
         elif isinstance(result, (int, float)):
             return result > 0.5  # Threshold for numeric results
+        elif isinstance(result, bool):
+            return result
         elif hasattr(result, 'turn_ended'):
             return bool(result.turn_ended)
         elif hasattr(result, 'is_complete'):
             return bool(result.is_complete)
-        elif isinstance(result, dict):
-            return result.get('turn_ended', result.get('is_complete', False))
         else:
             # Default: treat any non-None result as turn detection
             logger.debug(f"Unknown result format: {type(result)} - {result}")
@@ -220,15 +226,18 @@ class SmartTurnVAD:
         if result is None:
             return 0.0
             
-        # Common confidence extraction patterns:
-        if isinstance(result, (int, float)):
+        # Smart Turn v3 returns dict with 'probability' field
+        if isinstance(result, dict):
+            if 'probability' in result:
+                return float(result['probability'])
+            # Fallback patterns
+            return float(result.get('confidence', result.get('score', 1.0)))
+        elif isinstance(result, (int, float)):
             return float(result)
         elif hasattr(result, 'confidence'):
             return float(result.confidence)
         elif hasattr(result, 'score'):
             return float(result.score)
-        elif isinstance(result, dict):
-            return float(result.get('confidence', result.get('score', 1.0)))
         else:
             # Default confidence if result exists
             return 1.0

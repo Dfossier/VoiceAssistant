@@ -18,17 +18,20 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 async def test_smart_turn_installation():
     """Test if Smart Turn v3 can be imported and initialized"""
     try:
-        from pipecat.analyzers.smart_turn import LocalSmartTurnAnalyzerV3
-        logger.info("✅ Smart Turn v3 import successful")
+        from core.standalone_smart_turn import smart_turn_model
+        logger.info("✅ Smart Turn v3 standalone import successful")
         
         # Initialize analyzer
-        analyzer = LocalSmartTurnAnalyzerV3()
-        logger.info("✅ Smart Turn analyzer initialized")
-        
-        return analyzer
+        if smart_turn_model.initialize():
+            logger.info("✅ Smart Turn v3 standalone analyzer initialized")
+            return smart_turn_model
+        else:
+            logger.error("❌ Smart Turn v3 standalone initialization failed")
+            return None
+            
     except ImportError as e:
         logger.error(f"❌ Import error: {e}")
-        logger.info("💡 Try: pip install 'pipecat-ai[local-smart-turn-v3]==0.0.85'")
+        logger.info("💡 Check that standalone_smart_turn.py exists in src/core/")
         return None
     except Exception as e:
         logger.error(f"❌ Initialization error: {e}")
@@ -89,14 +92,20 @@ async def test_smart_turn_detection(analyzer, audio_data: bytes, sample_rate: in
         
         start_time = time.time()
         
-        # Smart Turn expects specific format - let's check documentation
-        # For now, try direct analysis
-        result = await analyzer.analyze(audio_data)
+        # Use standalone Smart Turn analyzer (synchronous, not async)
+        result = analyzer.analyze(audio_data)
         
         inference_time = (time.time() - start_time) * 1000  # ms
         
         logger.info(f"⚡ Smart Turn inference time: {inference_time:.1f}ms")
         logger.info(f"📊 Turn detection result: {result}")
+        
+        # Extract meaningful info from result
+        if isinstance(result, dict):
+            prediction = result.get('prediction', 0)
+            probability = result.get('probability', 0.0)
+            logger.info(f"   Prediction: {'Complete' if prediction == 1 else 'Incomplete'}")
+            logger.info(f"   Probability: {probability:.4f}")
         
         return result, inference_time
         
@@ -146,7 +155,8 @@ async def benchmark_performance(analyzer, audio_data: bytes, sample_rate: int, i
     for i in range(iterations):
         start_time = time.time()
         try:
-            result = await analyzer.analyze(audio_data)
+            # Use synchronous analyze method for standalone implementation
+            result = analyzer.analyze(audio_data)
             inference_time = (time.time() - start_time) * 1000
             times.append(inference_time)
             results.append(result)

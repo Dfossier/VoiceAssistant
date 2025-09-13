@@ -4,13 +4,15 @@ uvicorn[standard]==0.27.0
 websockets==12.0
 python-multipart==0.0.6
 
-# Discord & Pipecat Integration  
-pipecat-ai[discord,whisper,openai,local-smart-turn-v3]==0.0.85
+# Discord Integration (Pipecat removed - incompatible with our architecture)
 discord.py==2.3.2
 
-# Smart Turn VAD v3 Dependencies
+# Smart Turn VAD v3 Dependencies (standalone installation)
 onnxruntime>=1.20.1,<2
 numpy>=1.21.0
+torch>=1.9.0
+transformers>=4.20.0
+huggingface_hub>=0.10.0
 
 # Windows Automation (Windows-specific) - Optional for future use
 pywinauto==0.6.8; sys_platform == 'win32'
@@ -19,7 +21,7 @@ wexpect==4.0.0; sys_platform == 'win32'
 
 # File System Operations
 watchdog==3.0.0
-aiofiles==23.2.1
+aiofiles>=24.1.0,<25.0.0
 
 # Web Automation
 playwright==1.41.0

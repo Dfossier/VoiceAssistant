@@ -71,28 +71,37 @@ class SmartTurnVADWrapper:
     async def initialize(self) -> bool:
         """Initialize Smart Turn analyzer"""
         try:
-            from pipecat.analyzers.smart_turn import LocalSmartTurnAnalyzerV3
-            self.analyzer = LocalSmartTurnAnalyzerV3()
-            logger.info("✅ Smart Turn VAD initialized")
-            return True
+            from core.standalone_smart_turn import smart_turn_model
+            if smart_turn_model.initialize():
+                self.analyzer = smart_turn_model
+                logger.info("✅ Smart Turn VAD standalone initialized")
+                return True
+            else:
+                self.initialization_error = "Standalone Smart Turn initialization failed"
+                return False
         except Exception as e:
             self.initialization_error = str(e)
             logger.error(f"❌ Smart Turn initialization failed: {e}")
             return False
     
-    async def detect_turn_end(self, audio_data: bytes) -> Tuple[bool, float]:
-        """Detect turn end and return (is_turn_end, confidence)"""
+    async def detect_turn_end(self, audio_data: bytes) -> Tuple[bool, float, float]:
+        """Detect turn end and return (is_turn_end, confidence, inference_time_ms)"""
         if not self.analyzer:
-            return False, 0.0
+            return False, 0.0, 0.0
         
         try:
             start_time = time.time()
-            result = await self.analyzer.analyze(audio_data)
+            # Use synchronous analyze method for standalone implementation
+            result = self.analyzer.analyze(audio_data)
             inference_time = (time.time() - start_time) * 1000  # ms
             
-            # Extract turn detection result (format depends on implementation)
-            is_turn_end = bool(result) if result is not None else False
-            confidence = getattr(result, 'confidence', 1.0) if hasattr(result, 'confidence') else 1.0
+            # Extract turn detection result from standalone format
+            if isinstance(result, dict):
+                is_turn_end = bool(result.get('prediction', 0))
+                confidence = float(result.get('probability', 0.0))
+            else:
+                is_turn_end = bool(result) if result is not None else False
+                confidence = 1.0 if is_turn_end else 0.0
             
             return is_turn_end, confidence, inference_time
             
@@ -184,24 +193,33 @@ async def test_scenario(
         'smart_turn_approach': {}
     }
     
-    # Test current buffering approach
+    # Test current buffering approach - simulate real-time streaming
     logger.info("   📊 Testing current buffering approach...")
-    start_time = time.time()
-    
-    # Simulate processing audio in chunks
-    chunk_size = 8000  # 500ms chunks (16000 Hz * 0.5s * 2 bytes/sample)
     current_detected = False
     current_detection_time = 0
     
+    # Reset the VAD state
+    current_vad = CurrentBufferingVAD()
+    
+    # Simulate processing audio in real-time chunks
+    chunk_size = 8000  # 500ms chunks (16000 Hz * 0.5s * 2 bytes/sample)
+    total_processed_time = 0
+    
     for i in range(0, len(audio_data), chunk_size):
         chunk = audio_data[i:i+chunk_size]
+        chunk_duration = len(chunk) / (16000 * 2)  # Duration in seconds
+        total_processed_time += chunk_duration
+        
         if current_vad.should_process_audio(chunk):
-            current_detection_time = time.time() - start_time
+            # Current approach detects based on buffer size or silence timing
+            # It should wait at least until conditions are met
+            current_detection_time = total_processed_time
             current_detected = True
             break
     
     if not current_detected:
-        current_detection_time = expected_duration + 2.0  # Max buffer time
+        # If no detection, it would wait for maximum buffer time (2 seconds) plus processing
+        current_detection_time = max(2.0, total_processed_time)
     
     results['current_approach'] = {
         'detected': current_detected,
