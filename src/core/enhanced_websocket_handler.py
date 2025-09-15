@@ -58,6 +58,24 @@ class EnhancedAudioWebSocketHandler:
         except ImportError as e:
             logger.error(f"❌ Failed to import local models: {e}")
             self.model_manager = None
+            
+        # Import Claude Code integration
+        try:
+            from .claude_code_service import claude_code_integration
+            self.claude_code = claude_code_integration
+            logger.info("✅ Claude Code integration imported")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import Claude Code service: {e}")
+            self.claude_code = None
+            
+        # Import voice command processor
+        try:
+            from .voice_command_processor import voice_command_processor
+            self.voice_commands = voice_command_processor
+            logger.info("✅ Voice command processor imported")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import voice command processor: {e}")
+            self.voice_commands = None
     
     async def initialize(self):
         """Initialize all components"""
@@ -68,7 +86,15 @@ class EnhancedAudioWebSocketHandler:
             logger.info("✅ Smart Turn VAD initialized successfully")
         else:
             logger.error("❌ Failed to initialize Smart Turn VAD")
-            return False
+            
+        # Initialize Claude Code integration
+        if self.claude_code:
+            logger.info("🔄 Initializing Claude Code integration...")
+            claude_initialized = await self.claude_code.initialize()
+            if claude_initialized:
+                logger.info("✅ Claude Code integration initialized successfully")
+            else:
+                logger.warning("⚠️ Claude Code integration failed to initialize")
         
         # Ensure models are loaded
         models_loaded = await self.ensure_models_loaded()
@@ -436,29 +462,282 @@ class EnhancedAudioWebSocketHandler:
             return None
     
     async def generate_response(self, text: str, client_id: str) -> Optional[str]:
-        """Generate response using LLM"""
+        """Generate response using LLM with Claude Code context awareness"""
         if not self.model_manager:
             return None
         
         try:
-            # Simple context for now
-            messages = [
-                {"role": "system", "content": "Voice assistant. Brief, natural responses. Max 2 sentences."},
-                {"role": "user", "content": text}
+            # Check if this is a development-related query
+            dev_keywords = [
+                "code", "debug", "error", "file", "terminal", "command", "run", "fix", 
+                "edit", "python", "javascript", "npm", "git", "test", "build",
+                "function", "variable", "class", "method", "syntax", "import"
             ]
             
-            # Generate response using the correct method
-            # Convert messages to simple prompt format
-            user_message = next((msg['content'] for msg in messages if msg['role'] == 'user'), text)
-            system_message = next((msg['content'] for msg in messages if msg['role'] == 'system'), None)
+            is_dev_query = any(keyword in text.lower() for keyword in dev_keywords)
             
-            response = await self.model_manager.generate_response(user_message, system_message)
+            # Get Claude Code context if available and relevant
+            claude_context = ""
+            if self.claude_code and is_dev_query:
+                try:
+                    context_data = await self.claude_code.get_context_for_llm()
+                    if not context_data.get("error"):
+                        dev_ctx = context_data.get("development_context", {})
+                        recent_activity = context_data.get("recent_activity", [])
+                        
+                        # Build context summary
+                        context_parts = []
+                        
+                        if dev_ctx.get("current_files"):
+                            files = ", ".join(dev_ctx["current_files"][-3:])  # Last 3 files
+                            context_parts.append(f"Recent files: {files}")
+                            
+                        if dev_ctx.get("recent_commands"):
+                            commands = ", ".join(dev_ctx["recent_commands"][-2:])  # Last 2 commands
+                            context_parts.append(f"Recent commands: {commands}")
+                            
+                        if dev_ctx.get("active_errors"):
+                            errors = "; ".join(dev_ctx["active_errors"][-1:])  # Last error
+                            context_parts.append(f"Recent error: {errors}")
+                            
+                        if context_parts:
+                            claude_context = f"\n\nDevelopment context: {' | '.join(context_parts)}"
+                            
+                except Exception as e:
+                    logger.debug(f"Failed to get Claude Code context: {e}")
+            
+            # Enhanced system prompt with development awareness
+            if is_dev_query and claude_context:
+                system_message = (
+                    "You are a development assistant with access to the user's Claude Code session. "
+                    "Provide brief, helpful responses about coding, debugging, and development tasks. "
+                    f"Current context: {claude_context.strip()}"
+                )
+            else:
+                system_message = "Voice assistant. Brief, natural responses. Max 2 sentences."
+            
+            # First check for structured voice commands
+            if self.voice_commands:
+                voice_command = await self.voice_commands.process_voice_input(text)
+                if voice_command and voice_command.confidence > 0.7:
+                    result = await self._handle_voice_command(voice_command)
+                    return result
+            
+            # Fallback to simple terminal interaction checks
+            terminal_action = await self._check_terminal_request(text)
+            if terminal_action:
+                result = await self._handle_terminal_action(terminal_action)
+                return result
+            
+            # Generate response using LLM
+            response = await self.model_manager.generate_response(text, system_message)
             
             return response
             
         except Exception as e:
             logger.error(f"❌ LLM error: {e}")
             return None
+    
+    async def _check_terminal_request(self, text: str) -> Optional[Dict[str, str]]:
+        """Check if the user is requesting terminal interaction"""
+        text_lower = text.lower()
+        
+        # Terminal command patterns
+        if any(phrase in text_lower for phrase in [
+            "run command", "execute", "type in terminal", "send to terminal",
+            "run in terminal", "terminal command"
+        ]):
+            # Extract command from text
+            for trigger in ["run", "execute", "type"]:
+                if trigger in text_lower:
+                    parts = text_lower.split(trigger, 1)
+                    if len(parts) > 1:
+                        command = parts[1].strip()
+                        # Clean up command
+                        command = command.replace("in terminal", "").replace("in the terminal", "").strip()
+                        if command:
+                            return {"action": "send_command", "command": command}
+        
+        # Text addition patterns
+        if any(phrase in text_lower for phrase in [
+            "add text", "type", "write in terminal", "input"
+        ]):
+            # Extract text to add
+            for trigger in ["add", "type", "write", "input"]:
+                if trigger in text_lower:
+                    parts = text_lower.split(trigger, 1)
+                    if len(parts) > 1:
+                        text_to_add = parts[1].strip()
+                        text_to_add = text_to_add.replace("in terminal", "").replace("in the terminal", "").strip()
+                        if text_to_add:
+                            return {"action": "add_text", "text": text_to_add}
+        
+        return None
+    
+    async def _handle_terminal_action(self, action: Dict[str, str]) -> str:
+        """Handle terminal interaction requests"""
+        if not self.claude_code:
+            return "Terminal interaction not available - Claude Code integration not initialized."
+        
+        try:
+            result = await self.claude_code.process_llm_terminal_request(**action)
+            
+            if result.get("success"):
+                action_type = result.get("action")
+                if action_type == "send_command":
+                    command = result.get("command")
+                    return f"Executed command: {command}"
+                elif action_type == "add_text":
+                    text = result.get("text")
+                    return f"Added text to terminal: {text[:50]}..."
+                elif action_type == "get_output":
+                    output = result.get("output", "")
+                    return f"Terminal output: {output[-200:]}"  # Last 200 chars
+                else:
+                    return "Terminal action completed successfully."
+            else:
+                error = result.get("error", "Unknown error")
+                return f"Terminal action failed: {error}"
+                
+        except Exception as e:
+            logger.error(f"❌ Terminal action error: {e}")
+            return f"Error executing terminal action: {e}"
+    
+    async def _handle_voice_command(self, command) -> str:
+        """Handle structured voice commands"""
+        try:
+            action = command.action
+            params = command.parameters
+            
+            logger.info(f"🎤 Processing voice command: {action} with params: {params}")
+            
+            # Terminal commands
+            if action == "send_command":
+                if "command" in params:
+                    cmd = params["command"]
+                    # Safety check
+                    if self.voice_commands:
+                        safe, warning = self.voice_commands.check_safety(cmd)
+                        if not safe:
+                            return f"❌ Unsafe command blocked: {warning}"
+                        elif warning:
+                            return f"⚠️ {warning}. Say 'confirm' to proceed."
+                    
+                    if self.claude_code:
+                        result = await self.claude_code.process_llm_terminal_request(
+                            action="send_command", command=cmd
+                        )
+                        if result.get("success"):
+                            return self.voice_commands.format_response(
+                                "command_executed", command=cmd
+                            ) if self.voice_commands else f"✅ Executed: {cmd}"
+                        else:
+                            return f"❌ Command failed: {result.get('error', 'Unknown error')}"
+                    else:
+                        return "❌ Terminal integration not available"
+                        
+            elif action == "add_text":
+                if "text" in params:
+                    text = params["text"]
+                    if self.claude_code:
+                        result = await self.claude_code.process_llm_terminal_request(
+                            action="add_text", text=text
+                        )
+                        if result.get("success"):
+                            return self.voice_commands.format_response(
+                                "text_added", text=text[:50]
+                            ) if self.voice_commands else f"📝 Added: {text[:50]}..."
+                        else:
+                            return f"❌ Failed to add text: {result.get('error', 'Unknown error')}"
+                    else:
+                        return "❌ Terminal integration not available"
+                        
+            elif action == "get_output":
+                if self.claude_code:
+                    result = await self.claude_code.process_llm_terminal_request(action="get_output")
+                    if result.get("success"):
+                        output = result.get("output", "")
+                        return f"📺 Terminal output: {output[-200:]}" if output else "📺 No recent terminal output"
+                    else:
+                        return f"❌ Failed to get output: {result.get('error', 'Unknown error')}"
+                else:
+                    return "❌ Terminal integration not available"
+                    
+            elif action == "debug_assistance":
+                # Get current development context
+                if self.claude_code:
+                    context_data = await self.claude_code.get_context_for_llm()
+                    if not context_data.get("error"):
+                        dev_ctx = context_data.get("development_context", {})
+                        errors = dev_ctx.get("active_errors", [])
+                        
+                        if errors:
+                            error_summary = "; ".join(errors[-2:])  # Last 2 errors
+                            return f"🐛 Recent errors found: {error_summary}. I can help analyze these issues."
+                        else:
+                            return "✅ No recent errors detected in your development session."
+                    else:
+                        return "❌ Unable to access development context"
+                else:
+                    return "❌ Development context not available"
+                    
+            elif action == "project_summary":
+                if self.claude_code:
+                    context_data = await self.claude_code.get_context_for_llm()
+                    if not context_data.get("error"):
+                        dev_ctx = context_data.get("development_context", {})
+                        summary = dev_ctx.get("project_summary", "")
+                        files = dev_ctx.get("current_files", [])
+                        commands = dev_ctx.get("recent_commands", [])
+                        
+                        response_parts = []
+                        if summary:
+                            response_parts.append(summary)
+                        if files:
+                            response_parts.append(f"Recent files: {', '.join(files[-3:])}")
+                        if commands:
+                            response_parts.append(f"Recent commands: {', '.join(commands[-2:])}")
+                            
+                        return " | ".join(response_parts) if response_parts else "No recent development activity"
+                    else:
+                        return "❌ Unable to access project information"
+                else:
+                    return "❌ Project analysis not available"
+                    
+            elif action == "run_tests":
+                test_cmd = "npm test"  # Default test command
+                if "test_spec" in params:
+                    test_cmd = f"npm test {params['test_spec']}"
+                    
+                if self.claude_code:
+                    result = await self.claude_code.process_llm_terminal_request(
+                        action="send_command", command=test_cmd
+                    )
+                    if result.get("success"):
+                        return f"🧪 Running tests: {test_cmd}"
+                    else:
+                        return f"❌ Failed to run tests: {result.get('error', 'Unknown error')}"
+                else:
+                    return "❌ Cannot run tests - terminal integration not available"
+                    
+            elif action == "git_status":
+                if self.claude_code:
+                    result = await self.claude_code.process_llm_terminal_request(
+                        action="send_command", command="git status"
+                    )
+                    if result.get("success"):
+                        return "📝 Checking git status..."
+                    else:
+                        return f"❌ Failed to check git status: {result.get('error', 'Unknown error')}"
+                else:
+                    return "❌ Cannot check git - terminal integration not available"
+                    
+            else:
+                return f"❓ Unknown voice command action: {action}"
+                
+        except Exception as e:
+            logger.error(f"❌ Voice command error: {e}")
+            return f"Error processing voice command: {e}"
     
     async def synthesize_speech(self, text: str) -> Optional[bytes]:
         """Synthesize speech using TTS"""

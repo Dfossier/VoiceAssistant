@@ -1,0 +1,106 @@
+{
+  "development_commands": {
+    "file_operations": [
+      {
+        "trigger": ["read file", "open file", "show file"],
+        "action": "read_file",
+        "description": "Read and analyze a file from the current project"
+      },
+      {
+        "trigger": ["edit file", "modify file", "change file"],
+        "action": "edit_file", 
+        "description": "Edit a specific file in the project"
+      },
+      {
+        "trigger": ["create file", "new file", "make file"],
+        "action": "create_file",
+        "description": "Create a new file in the project"
+      }
+    ],
+    "terminal_commands": [
+      {
+        "trigger": ["run command", "execute", "run in terminal"],
+        "action": "send_command",
+        "description": "Execute a command in Claude Code terminal"
+      },
+      {
+        "trigger": ["type in terminal", "add text", "write in terminal"],
+        "action": "add_text",
+        "description": "Add text to Claude Code terminal without executing"
+      },
+      {
+        "trigger": ["show terminal", "terminal output", "what's in terminal"],
+        "action": "get_output",
+        "description": "Get recent terminal output"
+      }
+    ],
+    "development_helpers": [
+      {
+        "trigger": ["debug this", "fix error", "help with error"],
+        "action": "debug_assistance",
+        "description": "Analyze current errors and provide debugging help"
+      },
+      {
+        "trigger": ["explain code", "what does this do", "analyze code"],
+        "action": "code_explanation",
+        "description": "Explain the current code or recent changes"
+      },
+      {
+        "trigger": ["run tests", "test this", "check tests"],
+        "action": "run_tests",
+        "description": "Run project tests and analyze results"
+      },
+      {
+        "trigger": ["git status", "check git", "git info"],
+        "action": "git_status",
+        "description": "Check git repository status"
+      },
+      {
+        "trigger": ["install dependencies", "npm install", "pip install"],
+        "action": "install_deps",
+        "description": "Install project dependencies"
+      }
+    ],
+    "project_analysis": [
+      {
+        "trigger": ["project summary", "what's happening", "development status"],
+        "action": "project_summary",
+        "description": "Get summary of recent development activity"
+      },
+      {
+        "trigger": ["recent files", "what files", "file list"],
+        "action": "recent_files",
+        "description": "List recently accessed files"
+      },
+      {
+        "trigger": ["recent commands", "command history", "what commands"],
+        "action": "recent_commands", 
+        "description": "Show recently executed commands"
+      }
+    ]
+  },
+  "context_keywords": [
+    "code", "debug", "error", "file", "terminal", "command", "run", "fix",
+    "edit", "python", "javascript", "npm", "git", "test", "build", "function",
+    "variable", "class", "method", "syntax", "import", "export", "module",
+    "package", "dependency", "install", "compile", "lint", "format"
+  ],
+  "response_templates": {
+    "command_executed": "✅ Executed: {command}",
+    "text_added": "📝 Added to terminal: {text}",
+    "file_operation": "📄 {action}: {file}",
+    "error_help": "🐛 Error analysis: {analysis}",
+    "context_summary": "📊 Development context: {summary}",
+    "no_action": "❓ I didn't understand that command. Try 'run command X' or 'read file Y'."
+  },
+  "safety_filters": {
+    "dangerous_commands": [
+      "rm -rf", "del /s", "format", "fdisk", "dd if=", "shutdown", "reboot",
+      "killall", "pkill -9", "> /dev/", "curl | sh", "wget | sh"
+    ],
+    "require_confirmation": [
+      "git push", "git reset --hard", "npm publish", "pip install --upgrade",
+      "docker rm", "docker rmi", "systemctl", "service"
+    ]
+  }
+}
