@@ -33,12 +33,59 @@ for log_name in ['discord', 'discord.gateway', 'discord.client', 'discord.voice_
 class DirectAudioCapture:
     """Direct microphone capture bypassing Discord Opus"""
     
-    def __init__(self, websocket_url="ws://172.20.104.13:8001"):
+    def __init__(self, websocket_url="ws://172.20.104.13:8002", bot=None):
         self.websocket_url = websocket_url
         self.websocket_client = RobustWebSocketClient(websocket_url, self._handle_websocket_message)
         self.is_capturing = False
         self.chunks_sent = 0
         self.audio_thread = None
+        self.bot = bot
+        self.is_playing_tts = False  # Track when TTS is playing to prevent echo
+        self.tts_cooldown_until = 0  # Timestamp for TTS cooldown period
+        
+    def _should_process_audio(self, audio_data=None):
+        """Check if we should process audio (allows interruptions but prevents echo)"""
+        import time
+        import numpy as np
+        current_time = time.time()
+        
+        # During cooldown, only process if audio is loud enough (interruption)
+        if current_time < self.tts_cooldown_until:
+            if audio_data is not None:
+                # Calculate audio level to detect interruptions
+                audio_level = np.abs(audio_data).mean() if len(audio_data) > 0 else 0
+                interruption_threshold = 0.05  # Threshold for detecting speech vs echo
+                if audio_level > interruption_threshold:
+                    logger.info(f"🗣️ Interruption detected during cooldown (level: {audio_level:.3f})")
+                    return True
+            return False
+            
+        # During TTS playback, allow interruptions if audio is loud enough
+        if self.is_playing_tts:
+            if audio_data is not None:
+                audio_level = np.abs(audio_data).mean() if len(audio_data) > 0 else 0
+                interruption_threshold = 0.08  # Higher threshold during playback
+                if audio_level > interruption_threshold:
+                    logger.info(f"🛑 TTS interrupted by user speech (level: {audio_level:.3f})")
+                    # Stop current TTS playback
+                    if self.bot:
+                        for vc in self.bot.voice_clients:
+                            if vc.is_playing():
+                                vc.stop()
+                                break
+                    self._set_tts_playing(False, cooldown_seconds=0.5)  # Short cooldown after interruption
+                    return True
+            return False
+            
+        return True
+        
+    def _set_tts_playing(self, playing, cooldown_seconds=2.0):
+        """Set TTS playback state and cooldown period"""
+        import time
+        self.is_playing_tts = playing
+        if not playing:
+            # Set cooldown period after TTS stops
+            self.tts_cooldown_until = time.time() + cooldown_seconds
         
     async def _handle_websocket_message(self, message):
         """Handle messages received from the WebSocket server"""
@@ -48,6 +95,7 @@ class DirectAudioCapture:
                 if data.get("type") == "audio_output":
                     # Handle audio response from server
                     logger.info("🔊 Received audio response from server")
+                    await self._play_audio_response(data)
                 elif data.get("type") == "text":
                     # Handle text response from server
                     logger.info(f"💬 Server response: {data.get('text', '')[:50]}...")
@@ -148,7 +196,8 @@ class DirectAudioCapture:
                 if status:
                     logger.warning(f"Audio status: {status}")
                     
-                if self.is_capturing and len(indata) > 0:
+                # Check if we should process audio (allows interruptions)
+                if self.is_capturing and len(indata) > 0 and self._should_process_audio(indata):
                     audio_int16 = (indata * 32767).astype(np.int16)
                     threading.Thread(
                         target=self._send_audio_sync,
@@ -287,6 +336,29 @@ class DirectAudioCapture:
                 
         except Exception as e:
             logger.error(f"❌ Send error: {e}")
+    
+    async def _play_audio_response(self, audio_data):
+        """Play audio response through Discord voice channel"""
+        try:
+            import base64
+            import io
+            import discord
+            
+            # Decode base64 audio data
+            audio_bytes = base64.b64decode(audio_data.get("data", ""))
+            sample_rate = audio_data.get("sample_rate", 22050)
+            channels = audio_data.get("channels", 1)
+            
+            logger.info(f"🔊 Playing audio: {len(audio_bytes)} bytes at {sample_rate}Hz, {channels}ch")
+            
+            # Trigger playback through the bot instance
+            if self.bot:
+                await self.bot._play_audio_in_channel(audio_bytes, sample_rate, channels)
+            else:
+                logger.warning("⚠️ No bot instance - cannot play audio")
+                
+        except Exception as e:
+            logger.error(f"❌ Audio playback error: {e}")
 
 class DirectAudioBot(discord.Client):
     """Discord bot with direct audio capture"""
@@ -298,8 +370,9 @@ class DirectAudioBot(discord.Client):
         intents.guilds = True
         
         super().__init__(intents=intents)
-        self.audio_capture = DirectAudioCapture()
+        self.audio_capture = DirectAudioCapture(bot=self)
         self.capture_tasks = {}
+        self.pending_audio = None
         
     async def on_ready(self):
         logger.info(f"✅ Bot ready as {self.user}")
@@ -410,6 +483,83 @@ class DirectAudioBot(discord.Client):
             logger.info(f"🛑 Direct capture stopped. Sent {self.audio_capture.chunks_sent} chunks")
         except Exception as e:
             logger.error(f"❌ Capture loop error: {e}")
+    
+    async def _play_audio_in_channel(self, audio_bytes, sample_rate, channels):
+        """Play audio in the current voice channel"""
+        try:
+            import io
+            import discord
+            import tempfile
+            import os
+            import wave
+            
+            # Set TTS playing state to prevent echo
+            self.audio_capture._set_tts_playing(True)
+            
+            # Find an active voice client
+            voice_client = None
+            for vc in self.voice_clients:
+                if vc.is_connected():
+                    voice_client = vc
+                    break
+            
+            if not voice_client:
+                logger.warning("⚠️ No active voice connection for audio playback")
+                self.audio_capture._set_tts_playing(False)  # Clear state if no playback
+                return
+            
+            # Stop any currently playing audio
+            if voice_client.is_playing():
+                voice_client.stop()
+                await asyncio.sleep(0.1)  # Brief pause
+            
+            # Create temporary WAV file for Discord
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                temp_path = temp_file.name
+                
+                # Write PCM data as WAV file
+                with wave.open(temp_path, 'wb') as wav_file:
+                    wav_file.setnchannels(channels)
+                    wav_file.setsampwidth(2)  # 16-bit
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_bytes)
+                
+                # Create Discord audio source from file
+                audio_source = discord.FFmpegPCMAudio(
+                    temp_path,
+                    options='-f wav'
+                )
+                
+                # Clean up after playback
+                def cleanup_after_play(error):
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    if error:
+                        logger.error(f"Audio playback error: {error}")
+                    # Clear TTS playing state and start cooldown
+                    self.audio_capture._set_tts_playing(False)
+                
+                # Play audio with cleanup callback
+                voice_client.play(audio_source, after=cleanup_after_play)
+                logger.info(f"🔊 Playing TTS audio in {voice_client.channel.name} ({len(audio_bytes)} bytes at {sample_rate}Hz)")
+                
+        except Exception as e:
+            logger.error(f"❌ Discord audio playback error: {e}")
+            # Clear TTS state on error
+            self.audio_capture._set_tts_playing(False)
+            # Fallback: Try direct PCM
+            try:
+                if voice_client and not voice_client.is_playing():
+                    # Create a BytesIO stream for direct PCM
+                    pcm_source = discord.PCMAudio(io.BytesIO(audio_bytes))
+                    voice_client.play(pcm_source)
+                    logger.info("🔊 Fallback: Playing raw PCM audio")
+            except Exception as e2:
+                logger.error(f"❌ Fallback PCM playback failed: {e2}")
+                # Last resort: Log the issue
+                logger.error("❌ All audio playback methods failed - check Discord voice connection")
 
 def main():
     Config.validate()
