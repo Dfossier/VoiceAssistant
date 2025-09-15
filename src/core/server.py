@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
         model_status = local_model_manager.get_model_status()
         logger.info("📊 Model loading status:")
         logger.info(f"   STT: {'✅' if model_status['stt']['loaded'] else '❌'} ({model_status['stt']['model']})")
-        logger.info(f"   LLM: {'✅' if model_status['llm']['loaded'] else '❌'} (phi3_mini)")
+        logger.info(f"   LLM: {'✅' if model_status['llm']['loaded'] else '❌'} ({model_status['llm']['model']})")
         logger.info(f"   TTS: {'✅' if model_status['tts']['loaded'] else '❌'} (kokoro_tts)")
         
         # Initialize LLM handler (for fallback to API if needed)
@@ -120,24 +120,45 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Starting voice pipeline...")
         voice_pipeline_started = False
         
-        # Start BOTH handlers for testing
-        logger.info("🔧 Starting both SimpleAudioWebSocketHandler (port 8002) and Pipecat pipeline (port 8001)")
+        # Start Enhanced Audio WebSocket Handler with Smart Turn VAD
+        logger.info("🚀 Starting Enhanced Audio WebSocket Handler with Smart Turn VAD (port 8002)")
         
-        # Start SimpleAudioWebSocketHandler first (proven working)
+        # Start Enhanced handler with all optimizations
         try:
-            from .simple_websocket_handler import start_simple_audio_server
-            simple_started = await start_simple_audio_server()
-            if simple_started:
-                logger.info("✅ SimpleAudioWebSocketHandler started on ws://0.0.0.0:8002")
-                voice_pipeline_started = True
-            else:
-                logger.error("❌ Failed to start SimpleAudioWebSocketHandler")
-        except Exception as e:
-            logger.error(f"❌ Failed to start SimpleAudioWebSocketHandler: {e}")
+            from .enhanced_websocket_handler import EnhancedAudioWebSocketHandler
             
-        # Pipecat pipeline disabled - using SimpleAudioWebSocketHandler with Faster-Whisper instead
-        logger.info("⏭️  Skipping Pipecat pipeline - using SimpleAudioWebSocketHandler with Faster-Whisper STT")
-        logger.info("🔧 JSON Discord bot should connect to ws://localhost:8002 (SimpleAudioWebSocketHandler)")
+            # Create and initialize enhanced handler
+            enhanced_handler = EnhancedAudioWebSocketHandler(host="0.0.0.0", port=8002)
+            
+            # Start the enhanced server
+            await enhanced_handler.start_server()
+            
+            # Store reference for cleanup
+            app.state.enhanced_handler = enhanced_handler
+            
+            logger.info("✅ Enhanced Audio WebSocket Handler with Smart Turn VAD started on ws://0.0.0.0:8002")
+            logger.info("🎯 Features enabled: Smart Turn VAD, Pipeline Metrics, Optimized Inference")
+            voice_pipeline_started = True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to start Enhanced WebSocket Handler: {e}")
+            logger.info("🔄 Falling back to SimpleAudioWebSocketHandler...")
+            
+            # Fallback to simple handler
+            try:
+                from .simple_websocket_handler import start_simple_audio_server
+                simple_started = await start_simple_audio_server()
+                if simple_started:
+                    logger.info("✅ SimpleAudioWebSocketHandler started on ws://0.0.0.0:8002 (fallback)")
+                    voice_pipeline_started = True
+                else:
+                    logger.error("❌ Failed to start fallback SimpleAudioWebSocketHandler")
+            except Exception as fallback_e:
+                logger.error(f"❌ Fallback handler also failed: {fallback_e}")
+            
+        # Enhanced WebSocket Handler replaces both Pipecat and Simple handlers
+        logger.info("⚡ Enhanced WebSocket Handler provides Smart Turn VAD + Full Pipeline")
+        logger.info("🔧 Discord bot should connect to ws://172.20.104.13:8002 (Enhanced Handler with Smart Turn VAD)")
         
         if not voice_pipeline_started:
             logger.warning("⚠️ No voice pipeline available - voice features disabled")
@@ -154,6 +175,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Local AI Assistant...")
     
     try:
+        # Stop enhanced handler if running
+        if hasattr(app.state, 'enhanced_handler') and app.state.enhanced_handler:
+            await app.state.enhanced_handler.stop_server()
+            logger.info("✅ Enhanced WebSocket Handler stopped")
+            
         if file_monitor:
             await file_monitor.stop_monitoring()
         await ws_manager.disconnect_all()

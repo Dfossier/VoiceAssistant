@@ -9,7 +9,7 @@ from loguru import logger
 class LocalModelManager:
     """Manages local models for speech-to-text, language model, and text-to-speech"""
     
-    def __init__(self, skip_stt: bool = False, eager_load: bool = True):  # Enable STT for Faster-Whisper
+    def __init__(self, skip_stt: bool = True, eager_load: bool = True):  # Skip STT - Pipecat handles Whisper
         self.models_dir = Path("/mnt/c/users/dfoss/desktop/localaimodels")
         self.skip_stt = skip_stt  # Flag to skip STT model loading (use Pipecat's Whisper instead)
         self.eager_load = eager_load  # Flag to enable eager loading
@@ -30,11 +30,17 @@ class LocalModelManager:
                 'model_type': 'nvidia_nemo',
                 'description': 'NVIDIA Parakeet-TDT for speech recognition'
             },
-            'phi3_mini': {
-                'type': 'llm', 
-                'path': self.models_dir / 'phi3-mini',
+            # 'phi3_mini': {
+            #     'type': 'llm', 
+            #     'path': self.models_dir / 'phi3-mini',
+            #     'model_type': 'gguf',
+            #     'description': 'Microsoft Phi-3 Mini for language generation (disabled - using SmolLM2 instead)'
+            # },
+            'smollm2_1.7b': {
+                'type': 'llm',
+                'path': self.models_dir / 'smollm2-1.7b',
                 'model_type': 'gguf',
-                'description': 'Microsoft Phi-3 Mini for language generation'
+                'description': 'SmolLM2 1.7B - Fast conversational model'
             },
             'kokoro_tts': {
                 'type': 'tts',
@@ -125,33 +131,8 @@ class LocalModelManager:
             except Exception as e:
                 logger.error(f"❌ Error loading TTS model: {e}")
             
-            # Preload Whisper models if available
-            if self.has_whisper:
-                try:
-                    logger.info("🔄 Preloading Faster-Whisper model...")
-                    from faster_whisper import WhisperModel
-                    import torch
-                    
-                    self._faster_whisper_model = WhisperModel(
-                        "tiny",  # Use tiny model for speed
-                        device="cuda" if torch.cuda.is_available() else "cpu",
-                        compute_type="float16" if torch.cuda.is_available() else "int8"
-                    )
-                    logger.info("✅ Faster-Whisper model preloaded successfully!")
-                    
-                except ImportError:
-                    try:
-                        logger.info("🔄 Preloading standard Whisper model...")
-                        import whisper
-                        import torch
-                        
-                        self._whisper_model = whisper.load_model("base", device="cuda" if torch.cuda.is_available() else "cpu")
-                        logger.info("✅ Standard Whisper model preloaded successfully!")
-                        
-                    except Exception as e:
-                        logger.error(f"❌ Error preloading Whisper models: {e}")
-                except Exception as e:
-                    logger.error(f"❌ Error preloading Faster-Whisper: {e}")
+            # Skip Whisper preloading - Pipecat will handle Whisper models internally
+            logger.info("⏭️  Whisper preloading skipped - handled by Pipecat pipeline")
                     
             logger.info("🏁 Eager model loading completed")
                 
@@ -234,8 +215,16 @@ class LocalModelManager:
             return False
             
     async def load_llm_model(self):
-        """Load Phi-3 Mini for language generation"""
+        """Load LLM model - prefer SmolLM2 for speed, fallback to Phi-3"""
         try:
+            # First try SmolLM2 for faster performance
+            smollm2_path = self.model_configs['smollm2_1.7b']['path']
+            if smollm2_path.exists():
+                logger.info("🚀 SmolLM2 directory found, checking for model...")
+                return await self._load_smollm2_model(smollm2_path)
+            
+            # Fallback to Phi-3 if SmolLM2 not found
+            logger.info("SmolLM2 not found, falling back to Phi-3 Mini...")
             phi3_path = self.model_configs['phi3_mini']['path']
             
             # Look for GGUF format (llama.cpp compatible)
@@ -255,9 +244,10 @@ class LocalModelManager:
                         
                         self._llama_model = Llama(
                             model_path=str(model_file),
-                            n_ctx=4096,
-                            n_batch=512,
+                            n_ctx=2048,      # Reduced from 4096 for faster processing
+                            n_batch=1024,    # Increased from 512 for better GPU utilization
                             n_gpu_layers=gpu_layers,
+                            n_threads=4,     # Optimize CPU threads
                             verbose=False
                         )
                         
@@ -278,11 +268,11 @@ class LocalModelManager:
                     'model_type': 'gguf',
                     'context_length': 4096,
                     'model_params': {
-                        'n_ctx': 4096,
-                        'n_batch': 512,
+                        'n_ctx': 2048,       # Reduced context for speed
+                        'n_batch': 1024,     # Increased batch for efficiency
                         'n_gpu_layers': -1,  # Use all GPU layers if available
-                        'temperature': 0.7,
-                        'top_p': 0.9
+                        'temperature': 0.4,  # Lower temperature for faster, more focused responses
+                        'top_p': 0.8         # Slightly lower top_p for speed
                     },
                     'prompt_template': "<|system|>\n{system}<|end|>\n<|user|>\n{user}<|end|>\n<|assistant|>\n",
                     'loaded': self._llama_model is not None
@@ -306,6 +296,72 @@ class LocalModelManager:
             
         except Exception as e:
             logger.error(f"Failed to load Phi-3: {e}")
+            return False
+    
+    async def _load_smollm2_model(self, smollm2_path):
+        """Load SmolLM2 1.7B model optimized for fast conversations"""
+        try:
+            # Look for GGUF format
+            gguf_files = list(smollm2_path.glob("*.gguf"))
+            if not gguf_files:
+                logger.warning("No SmolLM2 GGUF files found")
+                return False
+                
+            model_file = gguf_files[0]
+            logger.info(f"✅ Found SmolLM2 GGUF model: {model_file.name}")
+            
+            # Eagerly load the model
+            if self.eager_load:
+                try:
+                    from llama_cpp import Llama
+                    
+                    logger.info("🔄 Loading SmolLM2 1.7B model (optimized for speed)...")
+                    gpu_layers = -1  # Use all GPU layers
+                    
+                    self._llama_model = Llama(
+                        model_path=str(model_file),
+                        n_ctx=2048,      # Optimal context for conversations
+                        n_batch=2048,    # Large batch for efficiency
+                        n_gpu_layers=gpu_layers,
+                        n_threads=8,     # More threads for faster inference
+                        verbose=False
+                    )
+                    
+                    logger.info("✅ SmolLM2 1.7B loaded successfully!")
+                    
+                except ImportError:
+                    logger.error("❌ llama-cpp-python not installed")
+                    self._llama_model = None
+                    return False
+                except Exception as e:
+                    logger.error(f"❌ Error loading SmolLM2: {e}")
+                    self._llama_model = None
+                    return False
+            else:
+                self._llama_model = None
+            
+            # Configuration for SmolLM2
+            self.models['llm'] = {
+                'model_path': str(model_file),
+                'model_type': 'gguf',
+                'model_name': 'smollm2-1.7b',
+                'context_length': 2048,
+                'model_params': {
+                    'n_ctx': 2048,
+                    'n_batch': 2048,
+                    'n_gpu_layers': -1,
+                    'temperature': 0.3,  # Lower for focused responses
+                    'top_p': 0.7,        # Optimized for speed
+                    'repeat_penalty': 1.1
+                },
+                'prompt_template': "Human: {user}\n\nAssistant:",  # Simple format for SmolLM2
+                'loaded': self._llama_model is not None
+            }
+            logger.info("✅ SmolLM2 1.7B configured for fast voice conversations")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load SmolLM2: {e}")
             return False
             
     async def load_tts_model(self):
@@ -541,19 +597,29 @@ class LocalModelManager:
         try:
             model_info = self.models['llm']
             
-            # Format prompt for Phi-3
-            if system_prompt:
-                formatted_prompt = model_info['prompt_template'].format(
-                    system=system_prompt,
-                    user=prompt
-                )
+            # Format prompt based on model type
+            model_name = model_info.get('model_name', 'LLM')
+            
+            if 'smollm2' in model_name.lower():
+                # SmolLM2 uses simpler format
+                if system_prompt:
+                    formatted_prompt = f"{system_prompt}\n\n{model_info['prompt_template'].format(user=prompt)}"
+                else:
+                    formatted_prompt = model_info['prompt_template'].format(user=prompt)
             else:
-                formatted_prompt = model_info['prompt_template'].format(
-                    system="You are a helpful AI assistant.",
-                    user=prompt
-                )
+                # Phi-3 format
+                if system_prompt:
+                    formatted_prompt = model_info['prompt_template'].format(
+                        system=system_prompt,
+                        user=prompt
+                    )
+                else:
+                    formatted_prompt = model_info['prompt_template'].format(
+                        system="You are a helpful AI assistant.",
+                        user=prompt
+                    )
                 
-            logger.info(f"Generating response with Phi-3 Mini for prompt: {prompt[:50]}...")
+            logger.info(f"Generating response with {model_name} for prompt: {prompt[:50]}...")
             
             # Actually load and use the Phi-3 model
             if model_info['model_type'] == 'gguf':
@@ -567,34 +633,44 @@ class LocalModelManager:
                             logger.warning("❌ Model was supposed to be loaded at startup but is missing - attempting load now...")
                         
                         gpu_layers = model_info['model_params']['n_gpu_layers']
+                        model_name = model_info.get('model_name', 'GGUF model')
                         if gpu_layers == -1:
-                            logger.info("🚀 Loading Phi-3 GGUF model with ALL GPU layers...")
+                            logger.info(f"🚀 Loading {model_name} with ALL GPU layers...")
                         elif gpu_layers > 0:
-                            logger.info(f"🚀 Loading Phi-3 GGUF model with {gpu_layers} GPU layers...")
+                            logger.info(f"🚀 Loading {model_name} with {gpu_layers} GPU layers...")
                         else:
-                            logger.info("🖥️  Loading Phi-3 GGUF model on CPU...")
+                            logger.info(f"🖥️  Loading {model_name} on CPU...")
                             
                         self._llama_model = Llama(
                             model_path=model_info['model_path'],
                             n_ctx=model_info['model_params']['n_ctx'],
                             n_batch=model_info['model_params']['n_batch'],
                             n_gpu_layers=model_info['model_params']['n_gpu_layers'],
+                            n_threads=model_info['model_params'].get('n_threads', 4),
                             verbose=False
                         )
-                        logger.info("✅ Phi-3 GGUF model loaded successfully!")
+                        logger.info(f"✅ {model_name} loaded successfully!")
+                    
+                    # Determine stop tokens based on model
+                    if 'smollm2' in model_info.get('model_name', '').lower():
+                        stop_tokens = ["Human:", "Assistant:", "\n\n"]
+                    else:
+                        stop_tokens = ["<|end|>", "<|user|>", "<|system|>"]
                     
                     # Generate response
                     response = self._llama_model(
                         formatted_prompt,
-                        max_tokens=512,
+                        max_tokens=128,  # Reduced from 512 for voice conversations
                         temperature=model_info['model_params']['temperature'],
                         top_p=model_info['model_params']['top_p'],
-                        stop=["<|end|>", "<|user|>", "<|system|>"],
-                        echo=False
+                        stop=stop_tokens,
+                        echo=False,
+                        repeat_penalty=model_info['model_params'].get('repeat_penalty', 1.0)
                     )
                     
                     generated_text = response['choices'][0]['text'].strip()
-                    logger.info(f"✅ Phi-3 generated: {generated_text[:100]}...")
+                    model_name = model_info.get('model_name', 'LLM')
+                    logger.info(f"✅ {model_name} generated: {generated_text[:100]}...")
                     return generated_text
                     
                 except ImportError:
@@ -777,8 +853,8 @@ class LocalModelManager:
             },
             'llm': {
                 'loaded': self.models['llm'] is not None,
-                'model': 'phi3_mini',
-                'path': str(self.model_configs['phi3_mini']['path'])
+                'model': 'smollm2_1.7b',
+                'path': str(self.model_configs['smollm2_1.7b']['path'])
             },
             'tts': {
                 'loaded': self.models['tts'] is not None,
@@ -789,4 +865,5 @@ class LocalModelManager:
 
 
 # Global instance with eager loading enabled by default
-local_model_manager = LocalModelManager(skip_stt=False, eager_load=True)
+# Skip STT since Pipecat uses its own Faster-Whisper implementation
+local_model_manager = LocalModelManager(skip_stt=True, eager_load=True)

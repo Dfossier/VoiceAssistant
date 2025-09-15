@@ -9,10 +9,17 @@ discord.py==2.3.2
 
 # Smart Turn VAD v3 Dependencies (standalone installation)
 onnxruntime>=1.20.1,<2
-numpy>=1.21.0
+numpy>=1.21.0,<2.3.0
 torch>=1.9.0
 transformers>=4.20.0
 huggingface_hub>=0.10.0
+
+# Enhanced Performance Dependencies
+concurrent.futures  # For thread pool optimization
+queue  # For object pooling
+threading  # For concurrent operations
+collections  # For deque-based metrics storage
+dataclasses  # For configuration management
 
 # Windows Automation (Windows-specific) - Optional for future use
 pywinauto==0.6.8; sys_platform == 'win32'
