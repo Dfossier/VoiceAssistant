@@ -22,14 +22,8 @@ class LocalModelManager:
         # Check for optional dependencies once at initialization
         self.has_whisper = self._check_whisper()
         if not self.has_whisper:
-            logger.info("Whisper not available - will use Parakeet-TDT for all transcriptions")
+            logger.info("Whisper not available - transcription may be limited")
         self.model_configs = {
-            'parakeet_tdt': {
-                'type': 'stt',
-                'path': self.models_dir / 'parakeet-tdt',
-                'model_type': 'nvidia_nemo',
-                'description': 'NVIDIA Parakeet-TDT for speech recognition'
-            },
             # 'phi3_mini': {
             #     'type': 'llm', 
             #     'path': self.models_dir / 'phi3-mini',
@@ -107,15 +101,8 @@ class LocalModelManager:
         if self.eager_load:
             logger.info("🚀 Starting eager model loading...")
             
-            # Load STT model
-            if not self.skip_stt:
-                try:
-                    stt_loaded = await self.load_stt_model()
-                    logger.info(f"STT model loading: {'✅ Success' if stt_loaded else '❌ Failed'}")
-                except Exception as e:
-                    logger.error(f"❌ Error loading STT model: {e}")
-            else:
-                logger.info("⏭️  STT model loading skipped")
+            # STT handled by Faster-Whisper
+            logger.info("📢 STT will be handled by Faster-Whisper model")
                 
             # Load LLM model
             try:
@@ -131,88 +118,25 @@ class LocalModelManager:
             except Exception as e:
                 logger.error(f"❌ Error loading TTS model: {e}")
             
-            # Skip Whisper preloading - Pipecat will handle Whisper models internally
-            logger.info("⏭️  Whisper preloading skipped - handled by Pipecat pipeline")
+            # Load Faster-Whisper model for STT
+            try:
+                logger.info("🎤 Loading Faster-Whisper model for STT...")
+                from faster_whisper import WhisperModel
+                import torch
+                
+                self._faster_whisper_model = WhisperModel(
+                    "small",  # Use small model for better accuracy (still fast on GPU)
+                    device="cuda" if torch.cuda.is_available() else "cpu",
+                    compute_type="float16" if torch.cuda.is_available() else "int8"
+                )
+                logger.info("✅ Faster-Whisper Small model loaded successfully")
+            except Exception as e:
+                logger.error(f"❌ Error loading Faster-Whisper model: {e}")
+                self._faster_whisper_model = None
                     
             logger.info("🏁 Eager model loading completed")
                 
-    async def load_stt_model(self):
-        """Load Parakeet-TDT for speech-to-text"""
-        if self.skip_stt:
-            logger.info("⏭️  Skipping Parakeet-TDT NeMo model loading (using Pipecat's Whisper instead)")
-            return False
-            
-        try:
-            parakeet_path = self.model_configs['parakeet_tdt']['path']
-            
-            # Check for NVIDIA NeMo format (.nemo files)
-            nemo_files = list(parakeet_path.glob("*.nemo"))
-            if nemo_files:
-                nemo_file = nemo_files[0]  # Use first .nemo file found
-                logger.info(f"Found Parakeet-TDT NeMo model: {nemo_file.name}")
-                
-                # Actually load the NeMo model at startup
-                try:
-                    logger.info("🔄 Pre-loading Parakeet-TDT NeMo model (this may take 30-60 seconds)...")
-                    import nemo.collections.asr as nemo_asr
-                    import torch
-                    
-                    # Load model with GPU acceleration if available
-                    if torch.cuda.is_available():
-                        logger.info(f"🚀 Loading Parakeet-TDT on GPU: {torch.cuda.get_device_name()}")
-                        self._nemo_model = nemo_asr.models.ASRModel.restore_from(
-                            str(nemo_file), 
-                            map_location='cuda'
-                        )
-                    else:
-                        logger.info("🐌 Loading Parakeet-TDT on CPU (slower)")
-                        self._nemo_model = nemo_asr.models.ASRModel.restore_from(
-                            str(nemo_file), 
-                            map_location='cpu'
-                        )
-                    
-                    # Put model in eval mode
-                    self._nemo_model.eval()
-                    
-                    # Store model info
-                    self.models['stt'] = {
-                        'model_path': str(nemo_file),
-                        'model_type': 'nemo',
-                        'model_name': 'parakeet-tdt-0.6b-v2',
-                        'loaded': True
-                    }
-                    
-                    logger.info("✅ Parakeet-TDT NeMo model fully loaded and ready!")
-                    return True
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to pre-load Parakeet-TDT: {e}")
-                    logger.info("⚠️ Will attempt lazy loading during first transcription")
-                    # Fall back to lazy loading config
-                    self.models['stt'] = {
-                        'model_path': str(nemo_file),
-                        'model_type': 'nemo',
-                        'model_name': 'parakeet-tdt-0.6b-v2',
-                        'loaded': False
-                    }
-                    return True
-                
-            # Check for ONNX format (more portable)
-            onnx_files = list(parakeet_path.glob("*.onnx"))
-            if onnx_files:
-                logger.info(f"Found ONNX model: {onnx_files[0].name}")
-                # Would use onnxruntime for inference
-                # import onnxruntime as ort
-                # self.models['stt'] = ort.InferenceSession(str(onnx_files[0]))
-                logger.info("Parakeet-TDT ONNX model ready for integration")
-                return True
-                
-            logger.warning("Parakeet-TDT model format not recognized")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to load Parakeet-TDT: {e}")
-            return False
+    # Removed load_stt_model - using Faster-Whisper instead
             
     async def load_llm_model(self):
         """Load LLM model - prefer SmolLM2 for speed, fallback to Phi-3"""
@@ -385,8 +309,12 @@ class LocalModelManager:
                 logger.info(f"Found Kokoro TTS model files: {[f.name for f in model_files[:3]]}")
                 
                 # Eagerly initialize the Kokoro TTS service if requested
-                if self.eager_load:
+                if self.eager_load and not os.environ.get('DISABLE_KOKORO'):
                     try:
+                        # Apply phonemizer fix BEFORE importing Kokoro
+                        from .phonemizer_fix import apply_phonemizer_fix
+                        apply_phonemizer_fix()
+                        
                         from .kokoro_tts_service import KokoroTTSService
                         logger.info("🔄 Initializing Kokoro TTS service...")
                         
@@ -395,6 +323,7 @@ class LocalModelManager:
                         
                         if tts_initialized:
                             logger.info("✅ Kokoro TTS service initialized successfully!")
+                            logger.info("🎵 Kokoro TTS ready for voice synthesis")
                         else:
                             logger.error("❌ Failed to initialize Kokoro TTS service")
                             self._kokoro_service = None
@@ -453,18 +382,22 @@ class LocalModelManager:
                 if self.eager_load:
                     logger.warning("❌ Faster-Whisper model was supposed to be loaded at startup but is missing")
                 
-                logger.info("Loading Faster-Whisper Tiny model for speed...")
+                logger.info("Loading Faster-Whisper Small model for better accuracy...")
                 self._faster_whisper_model = WhisperModel(
-                    "tiny",  # Use tiny model for speed (~1.5s -> 0.1-0.2s)
+                    "small",  # Use small model for better accuracy (still fast on GPU)
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     compute_type="float16" if torch.cuda.is_available() else "int8"
                 )
-                logger.info("✅ Faster-Whisper Tiny model loaded (optimized for speed)")
+                logger.info("✅ Faster-Whisper Small model loaded (better accuracy)")
             
             # Transcribe with Faster-Whisper
             segments, info = self._faster_whisper_model.transcribe(audio_array, language="en")
             text = " ".join([segment.text for segment in segments]).strip()
             logger.info(f"✅ Faster-Whisper transcribed: {text}")
+            
+            # Echo prevention is now handled by exact-match detection in enhanced_websocket_handler
+            # This allows all user speech through, including legitimate "thank you" messages
+            
             return text
             
         except ImportError:
@@ -507,92 +440,20 @@ class LocalModelManager:
             logger.warning("STT model not loaded, using fallback")
             return ""
             
-        try:
-            logger.info(f"Transcribing {len(audio_data)} bytes of audio with Parakeet-TDT")
-            
-            # Use NVIDIA NeMo for Parakeet-TDT inference
-            try:
-                import nemo.collections.asr as nemo_asr
-                import tempfile
-                import wave
-                import numpy as np
-                from scipy.io.wavfile import write
-                
-                # Check if we have a loaded NeMo model
-                if not hasattr(self, '_nemo_model') or self._nemo_model is None:
-                    logger.warning("❌ Parakeet-TDT model not pre-loaded, attempting to load now...")
-                    model_path = self.models['stt'].get('model_path')
-                    if not model_path:
-                        logger.error("No model path found!")
-                        return ""
-                    
-                    # Load model with GPU acceleration if available
-                    import torch
-                    if torch.cuda.is_available():
-                        logger.info(f"🚀 Loading Parakeet-TDT on GPU: {torch.cuda.get_device_name()}")
-                        self._nemo_model = nemo_asr.models.EncDecRNNTBPEModel.restore_from(model_path, map_location="cuda")
-                        self._nemo_model = self._nemo_model.cuda()
-                    else:
-                        logger.info("🖥️  Loading Parakeet-TDT on CPU")
-                        self._nemo_model = nemo_asr.models.EncDecRNNTBPEModel.restore_from(model_path, map_location="cpu")
-                    
-                    self._nemo_model.eval()
-                    logger.info("✅ Parakeet-TDT model loaded successfully!")
-                
-                # Convert raw PCM bytes to proper WAV file for NeMo
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav:
-                    temp_path = temp_wav.name
-                
-                # Write proper WAV file with headers
-                with wave.open(temp_path, 'wb') as wav_file:
-                    wav_file.setnchannels(1)  # mono
-                    wav_file.setsampwidth(2)  # 16-bit
-                    wav_file.setframerate(sample_rate)  # use provided sample rate
-                    wav_file.writeframes(audio_data)
-                
-                try:
-                    # Transcribe using NeMo model
-                    transcription = self._nemo_model.transcribe([temp_path])
-                    
-                    if transcription and len(transcription) > 0:
-                        # Handle Hypothesis object from NeMo
-                        hypothesis = transcription[0]
-                        if hasattr(hypothesis, 'text'):
-                            result = hypothesis.text.strip()
-                        elif hasattr(hypothesis, 'pred_text'):
-                            result = hypothesis.pred_text.strip()
-                        else:
-                            result = str(hypothesis).strip()
-                        
-                        logger.info(f"✅ Parakeet-TDT transcription: '{result[:100]}...'")
-                        return result
-                    else:
-                        logger.warning("Empty transcription from Parakeet-TDT")
-                        return ""
-                        
-                finally:
-                    import os
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-                        
-            except ImportError:
-                logger.error("❌ NeMo not installed. Install with: pip install nemo_toolkit[asr]")
-                return ""
-            except Exception as e:
-                logger.error(f"❌ Error with Parakeet-TDT: {e}")
-                return ""
-            
-        except Exception as e:
-            logger.error(f"Transcription error: {e}")
-            return ""
+        # Parakeet-TDT removed - using Faster-Whisper instead
+        logger.error("❌ Parakeet-TDT has been removed. Please use Faster-Whisper for transcription.")
+        return ""
             
     async def generate_response(self, prompt: str, system_prompt: str = None) -> str:
         """Generate response using Phi-3 Mini"""
         if not self.models['llm']:
             logger.warning("LLM model not loaded")
             return "LLM model not available"
+            
+        # Filter out empty or blocked prompts
+        if not prompt or not prompt.strip():
+            logger.debug("🔇 Skipping empty prompt")
+            return ""
             
         try:
             model_info = self.models['llm']
@@ -736,6 +597,12 @@ class LocalModelManager:
             return b""
             
         try:
+            # Limit text length to prevent massive audio files (WebSocket has 1MB limit)
+            max_chars = 400  # ~400 chars = ~200KB audio (well under 1MB limit)
+            if len(text) > max_chars:
+                text = text[:max_chars] + "..."
+                logger.info(f"🔧 Truncated long text to {max_chars} characters for TTS")
+            
             logger.info(f"Synthesizing speech with Kokoro TTS: '{text[:50]}...'")
             
             # Re-enable Kokoro with debugging
@@ -743,11 +610,15 @@ class LocalModelManager:
             
             if use_kokoro:
                 # Try to use the new Kokoro wrapper that bypasses espeak issues
+                if os.environ.get('DISABLE_KOKORO'):
+                    logger.warning("⚠️ Kokoro disabled, using fallback TTS")
+                    return None
+                    
                 try:
                     # Use the new integration that handles espeak issues
                     from .kokoro_integration import create_kokoro_tts_integration
                     
-                    if not hasattr(self, '_kokoro_integration'):
+                    if not hasattr(self, '_kokoro_integration') or self._kokoro_integration is None:
                         logger.info("🔧 Initializing Kokoro TTS integration...")
                         self._kokoro_integration = create_kokoro_tts_integration()
                     
@@ -759,8 +630,16 @@ class LocalModelManager:
                     }
                     kokoro_voice = voice_map.get(voice, 'af_heart')
                     
-                    # Synthesize with new wrapper
-                    audio_data, sample_rate = await self._kokoro_integration.synthesize(text, voice=kokoro_voice)
+                    # Synthesize with new wrapper - handle different return formats
+                    result = await self._kokoro_integration.synthesize(text, voice=kokoro_voice)
+                    
+                    # Handle different return formats
+                    if isinstance(result, tuple) and len(result) == 2:
+                        audio_data, sample_rate = result
+                    elif isinstance(result, bytes):
+                        audio_data, sample_rate = result, 24000
+                    else:
+                        audio_data, sample_rate = None, 24000
                     
                     if audio_data and len(audio_data) > 0:
                         logger.info(f"✅ Kokoro TTS generated {len(audio_data)} bytes at {sample_rate}Hz")
@@ -865,5 +744,5 @@ class LocalModelManager:
 
 
 # Global instance with eager loading enabled by default
-# Skip STT since Pipecat uses its own Faster-Whisper implementation
-local_model_manager = LocalModelManager(skip_stt=True, eager_load=True)
+# Don't skip STT - we need it for the Simple WebSocket Handler
+local_model_manager = LocalModelManager(skip_stt=False, eager_load=True)

@@ -24,6 +24,96 @@ from .vad_config import vad_config, VADTuner
 logger = logging.getLogger(__name__)
 
 
+class IntelligentAudioGate:
+    """Intelligent timing-based audio gating to prevent echo loops"""
+    
+    def __init__(self):
+        self.gate_until = 0
+        self.recent_tts_durations = []
+        self.conversation_state = "listening"
+        self.adaptive_buffer = 0.5  # Adaptive silence buffer
+        self.max_recent_durations = 5  # Keep last 5 for learning
+    
+    def start_intelligent_gate(self, tts_text: str, tts_speed: float = 1.0):
+        """Calculate precise gate timing based on TTS content"""
+        
+        # Calculate TTS duration more accurately
+        word_count = len(tts_text.split())
+        estimated_duration = word_count * 0.6 / tts_speed  # ~0.6s per word
+        
+        # Add adaptive buffer based on recent performance
+        buffer = self.calculate_adaptive_buffer()
+        
+        total_gate_time = estimated_duration + buffer
+        self.gate_until = time.time() + total_gate_time
+        self.conversation_state = "gated"
+        
+        # Track for learning
+        self.recent_tts_durations.append({
+            'estimated': estimated_duration,
+            'buffer': buffer,
+            'total': total_gate_time,
+            'timestamp': time.time(),
+            'word_count': word_count
+        })
+        
+        # Keep only recent durations
+        if len(self.recent_tts_durations) > self.max_recent_durations:
+            self.recent_tts_durations = self.recent_tts_durations[-self.max_recent_durations:]
+        
+        logger.info(f"🔇 Audio gate ACTIVE: {total_gate_time:.1f}s for {word_count} words: '{tts_text[:50]}...'")
+        logger.info(f"🔇 Gate active until: {time.strftime('%H:%M:%S', time.localtime(self.gate_until))}")
+    
+    def calculate_adaptive_buffer(self):
+        """Learn optimal buffer timing from recent performance"""
+        if len(self.recent_tts_durations) < 3:
+            return 0.5  # Default buffer
+            
+        # Analyze recent timing patterns
+        recent = self.recent_tts_durations[-3:]  # Last 3 TTS events
+        
+        # Check if we need more or less buffer time
+        # (In practice, you'd measure actual TTS completion vs estimates)
+        avg_buffer = np.mean([event['buffer'] for event in recent])
+        
+        # Gradually adapt buffer (conservative approach)
+        if avg_buffer < 0.3:
+            return 0.3  # Minimum buffer
+        elif avg_buffer > 1.0:
+            return 1.0  # Maximum buffer
+        else:
+            return avg_buffer
+    
+    def should_process_audio(self):
+        """Check if audio processing should be allowed"""
+        current_time = time.time()
+        
+        if current_time < self.gate_until:
+            time_remaining = self.gate_until - current_time
+            logger.info(f"🔇 Audio GATED - {time_remaining:.1f}s remaining (current: {time.strftime('%H:%M:%S', time.localtime(current_time))})")
+            return False
+        
+        # Gate is open
+        if self.conversation_state != "listening":
+            self.conversation_state = "listening"
+            logger.info("🎤 Audio gate OPENED - ready for input")
+        
+        return True
+    
+    def get_gate_status(self):
+        """Get current gate status for debugging"""
+        current_time = time.time()
+        is_gated = current_time < self.gate_until
+        time_remaining = max(0, self.gate_until - current_time)
+        
+        return {
+            'is_gated': is_gated,
+            'time_remaining': time_remaining,
+            'conversation_state': self.conversation_state,
+            'recent_events': len(self.recent_tts_durations)
+        }
+
+
 class EnhancedAudioWebSocketHandler:
     """
     Enhanced WebSocket server with Smart Turn VAD and performance metrics
@@ -49,6 +139,10 @@ class EnhancedAudioWebSocketHandler:
         
         # VAD tuner for dynamic optimization
         self.vad_tuner = VADTuner(vad_config)
+        
+        # Echo detection - track what bot said recently
+        self.recent_tts_outputs = []  # List of (text, timestamp) tuples
+        self.tts_output_window = 10.0  # Keep last 10 seconds of TTS output
         
         # Import local models
         try:
@@ -76,6 +170,19 @@ class EnhancedAudioWebSocketHandler:
         except ImportError as e:
             logger.error(f"❌ Failed to import voice command processor: {e}")
             self.voice_commands = None
+            
+        # Import voice formatting agent
+        try:
+            from .voice_formatting_agent import get_formatting_agent
+            self.formatting_agent = None  # Will be initialized when needed
+            self._get_formatting_agent = get_formatting_agent
+            logger.info("✅ Voice formatting agent imported")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import voice formatting agent: {e}")
+            self._get_formatting_agent = None
+            
+        # Intelligent timing gate for echo prevention
+        self.audio_gate = IntelligentAudioGate()
     
     async def initialize(self):
         """Initialize all components"""
@@ -143,28 +250,46 @@ class EnhancedAudioWebSocketHandler:
             
         # Remove whitespace and check length
         cleaned = text.strip()
-        if len(cleaned) < 2:  # Filter very short transcriptions
-            return False
-            
-        # Filter common noise patterns (case insensitive)
-        noise_patterns = [
-            "um", "uh", "hmm", "ah", "oh", "eh", 
-            "yeah", "yes", "no", "ok", "okay",
-            "hello", "hi", "hey",  # Common echo patterns
-            "thanks", "thank you",  # Short responses that might be echo
-            "sure", "right", "good",
-            ".", ",", "?", "!",  # Punctuation only
-        ]
-        
-        if cleaned.lower() in noise_patterns:
-            return False
-            
-        # Filter repetitive patterns (like "hello hello hello")
-        words = cleaned.lower().split()
-        if len(words) > 1 and len(set(words)) == 1:  # All words are the same
+        if len(cleaned) < 2:  # Filter very short transcriptions only
             return False
             
         return True
+    
+    def _track_tts_output(self, text: str):
+        """Track what the bot says for echo detection"""
+        current_time = time.time()
+        self.recent_tts_outputs.append((text.lower().strip(), current_time))
+        
+        # Clean up old entries
+        cutoff_time = current_time - self.tts_output_window
+        self.recent_tts_outputs = [(t, ts) for t, ts in self.recent_tts_outputs if ts > cutoff_time]
+        
+        logger.info(f"📝 Tracking TTS output: '{text[:50]}...' (keeping {len(self.recent_tts_outputs)} recent outputs)")
+    
+    def _is_echo_transcription(self, transcription: str) -> bool:
+        """Check if a transcription matches recent TTS output"""
+        if not transcription:
+            return False
+            
+        transcription_lower = transcription.lower().strip()
+        current_time = time.time()
+        
+        # Check exact matches with recent TTS outputs
+        for tts_text, timestamp in self.recent_tts_outputs:
+            # Only check outputs from the last 5 seconds (typical echo window)
+            if current_time - timestamp < 5.0:
+                # Check for exact match or if transcription is contained in TTS output
+                if transcription_lower == tts_text or transcription_lower in tts_text:
+                    logger.info(f"🔇 Detected echo: '{transcription}' matches recent TTS output")
+                    return True
+                    
+                # Also check if TTS output is contained in transcription (partial echo)
+                if len(tts_text) > 10 and tts_text in transcription_lower:
+                    logger.info(f"🔇 Detected partial echo: TTS '{tts_text[:30]}...' found in '{transcription}'")
+                    return True
+        
+        return False
+    
     
     async def start_server(self):
         """Start the enhanced WebSocket server"""
@@ -334,16 +459,68 @@ class EnhancedAudioWebSocketHandler:
                 with MetricsContext(trace_id, "audio", "wav_conversion"):
                     audio_data = await self.wav_to_pcm(audio_data)
             
+            # Calculate and log audio levels
+            audio_levels = self.calculate_audio_levels(audio_data, sample_rate)
+            logger.info(f"🎚️ Audio levels - RMS: {audio_levels['rms_db']}dB, Peak: {audio_levels['peak_db']}dB, Duration: {audio_levels['duration_ms']}ms")
+            
+            # Check if we should process this audio quality
+            if not self._should_process_low_quality_audio(audio_levels):
+                await self.send_audio_quality_warning(websocket, audio_levels)
+                return
+            
+            # Apply audio normalization if needed (for audio that's too quiet but not rejected)
+            if audio_levels['rms_db'] < -45:
+                logger.debug(f"🔧 Applying audio normalization (current RMS: {audio_levels['rms_db']}dB)")
+                audio_data = self.normalize_audio_levels(audio_data, target_rms_db=-35.0)
+                # Recalculate levels after normalization
+                normalized_levels = self.calculate_audio_levels(audio_data, sample_rate)
+                logger.info(f"🔊 Post-normalization levels - RMS: {normalized_levels['rms_db']}dB, Peak: {normalized_levels['peak_db']}dB")
+            
+            # Check if audio is too quiet (likely silence)
+            if audio_levels['rms_db'] < -50:
+                logger.debug(f"🔇 Very quiet audio detected (RMS: {audio_levels['rms_db']}dB)")
+            
             # Add to VAD buffer
-            with MetricsContext(trace_id, "vad", "buffer_processing"):
+            with MetricsContext(trace_id, "vad", "buffer_processing", 
+                              audio_rms_db=audio_levels['rms_db'], 
+                              audio_peak_db=audio_levels['peak_db'],
+                              audio_duration_ms=audio_levels['duration_ms']) as ctx:
                 buffer_ready = self.vad.add_audio_chunk(audio_data)
                 session["audio_buffer"].extend(audio_data)
                 session["total_audio_processed"] += len(audio_data)
             
             # Check for turn end if buffer is ready
             if buffer_ready:
+                # Audio quality check - warn but don't block
+                if audio_levels['rms_db'] < -70:
+                    logger.warning(f"⚠️ Very poor audio quality ({audio_levels['rms_db']:.1f}dB) - may affect recognition")
+                    # Continue processing but warn about quality
+                
+                # Use FIXED VAD threshold from config (NO ADAPTIVE ADJUSTMENTS)
+                # This prevents over-sensitivity and maintains our configured settings
+                fixed_threshold = self.vad.confidence_threshold  # Use our 0.92 setting
+                
                 with MetricsContext(trace_id, "vad", "inference") as vad_ctx:
                     is_turn_end, confidence, vad_metadata = await self.vad.detect_turn_end()
+                    
+                    # Add confidence and decision to metrics context
+                    if vad_ctx.event:
+                        vad_ctx.event.metadata.update({
+                            'vad_confidence': confidence,
+                            'vad_decision': is_turn_end,
+                            'vad_threshold': fixed_threshold,
+                            'vad_threshold_original': fixed_threshold,
+                            'adaptive_disabled': True
+                        })
+                    
+                    # Log VAD confidence and decision with FIXED threshold info
+                    logger.info(f"🎯 VAD Decision - Turn End: {'YES' if is_turn_end else 'NO'}, Confidence: {confidence:.2f}")
+                    logger.info(f"🎯 VAD Threshold: {fixed_threshold:.2f} (FIXED - no adaptive adjustments)")
+                    logger.info(f"🎯 Audio Quality: {audio_levels['rms_db']:.1f}dB RMS, {audio_levels['peak_db']:.1f}dB peak")
+                    
+                    # Additional debug info for VAD metadata
+                    if vad_metadata:
+                        logger.debug(f"📊 VAD Metadata: inference_time={vad_metadata.get('inference_time_ms', 0):.1f}ms, buffer_duration={vad_metadata.get('buffer_duration', 0):.1f}s")
                     
                     # Record for tuning
                     self.vad_tuner.record_detection(
@@ -352,6 +529,9 @@ class EnhancedAudioWebSocketHandler:
                         latency_ms=vad_metadata.get("inference_time_ms", 0),
                         audio_duration_ms=len(session["audio_buffer"]) / (sample_rate * 2) * 1000
                     )
+                
+                # Restore original VAD threshold
+                # Threshold is already fixed at the configured value (no reset needed)
                 
                 if is_turn_end:
                     logger.info(f"🎯 Turn end detected! Confidence: {confidence:.2f}")
@@ -391,6 +571,10 @@ class EnhancedAudioWebSocketHandler:
             # Convert buffer to proper format
             audio_array = np.frombuffer(audio_buffer, dtype=np.int16)
             
+            # Log final audio levels for complete utterance
+            final_levels = self.calculate_audio_levels(bytes(audio_buffer), sample_rate)
+            logger.info(f"📊 Complete utterance audio - RMS: {final_levels['rms_db']}dB, Peak: {final_levels['peak_db']}dB, Duration: {final_levels['duration_ms']}ms, Energy variation: {final_levels['energy_variation']}")
+            
             # STT Processing
             with MetricsContext(trace_id, "stt", "transcription"):
                 transcription = await self.transcribe_audio(audio_array, sample_rate)
@@ -399,9 +583,14 @@ class EnhancedAudioWebSocketHandler:
                 await self.send_error(websocket, "Transcription failed")
                 return
             
-            # Filter empty or minimal transcriptions to prevent processing noise/echo
+            # Filter empty or minimal transcriptions
             if not self._is_valid_transcription(transcription):
                 logger.debug(f"🔇 Filtered transcription (too short/empty): '{transcription}'")
+                return
+            
+            # Check if this is an echo of recent TTS output
+            if self._is_echo_transcription(transcription):
+                logger.info(f"🔇 Filtered echo transcription: '{transcription}'")
                 return
             
             logger.info(f"📝 Transcription: {transcription}")
@@ -418,6 +607,13 @@ class EnhancedAudioWebSocketHandler:
                 return
             
             logger.info(f"💬 Response: {response}")
+            
+            # Track TTS output for echo detection
+            self._track_tts_output(response)
+            
+            # Start audio gate before TTS synthesis
+            logger.info(f"🔇 Starting audio gate for response: '{response[:50]}...'")
+            self.audio_gate.start_intelligent_gate(response)
             
             # TTS Processing
             with MetricsContext(trace_id, "tts", "synthesis"):
@@ -539,8 +735,31 @@ class EnhancedAudioWebSocketHandler:
             return None
     
     async def _check_terminal_request(self, text: str) -> Optional[Dict[str, str]]:
-        """Check if the user is requesting terminal interaction"""
+        """Check if the user is requesting terminal interaction or Claude summaries"""
         text_lower = text.lower()
+        
+        # Claude summary patterns
+        if any(phrase in text_lower for phrase in [
+            "give me an update", "give me the update", "what's the update",
+            "what's the latest", "what is the latest", "latest update"
+        ]):
+            return {"action": "claude_latest_response"}
+        
+        if any(phrase in text_lower for phrase in [
+            "what did claude say", "what claude said", "claude's response"
+        ]):
+            return {"action": "claude_latest_response"}
+        
+        if any(phrase in text_lower for phrase in [
+            "where are we", "current status", "where we at"
+        ]):
+            return {"action": "claude_conversation_summary"}
+        
+        # Press Enter/Execute patterns
+        if any(phrase in text_lower for phrase in [
+            "press enter", "send", "execute that", "run that"
+        ]):
+            return {"action": "press_enter"}
         
         # Terminal command patterns
         if any(phrase in text_lower for phrase in [
@@ -575,29 +794,50 @@ class EnhancedAudioWebSocketHandler:
         return None
     
     async def _handle_terminal_action(self, action: Dict[str, str]) -> str:
-        """Handle terminal interaction requests"""
+        """Handle terminal interaction requests and Claude summaries"""
         if not self.claude_code:
             return "Terminal interaction not available - Claude Code integration not initialized."
         
         try:
-            result = await self.claude_code.process_llm_terminal_request(**action)
+            action_type = action.get("action")
             
-            if result.get("success"):
-                action_type = result.get("action")
-                if action_type == "send_command":
-                    command = result.get("command")
-                    return f"Executed command: {command}"
-                elif action_type == "add_text":
-                    text = result.get("text")
-                    return f"Added text to terminal: {text[:50]}..."
-                elif action_type == "get_output":
-                    output = result.get("output", "")
-                    return f"Terminal output: {output[-200:]}"  # Last 200 chars
+            # Handle Claude summary requests
+            if action_type == "claude_latest_response":
+                response = await self.claude_code.get_claude_latest_response()
+                return response
+            
+            elif action_type == "claude_conversation_summary":
+                summary = await self.claude_code.get_claude_conversation_summary()
+                return summary
+            
+            elif action_type == "press_enter":
+                # Send just Enter to execute current terminal input
+                result = await self.claude_code.process_llm_terminal_request("send_command", command="")
+                if result.get("success"):
+                    return "✅ Pressed Enter to execute"
                 else:
-                    return "Terminal action completed successfully."
+                    return "❌ Failed to press Enter"
+            
+            # Handle terminal requests
             else:
-                error = result.get("error", "Unknown error")
-                return f"Terminal action failed: {error}"
+                result = await self.claude_code.process_llm_terminal_request(**action)
+                
+                if result.get("success"):
+                    action_type = result.get("action")
+                    if action_type == "send_command":
+                        command = result.get("command")
+                        return f"Executed command: {command}"
+                    elif action_type == "add_text":
+                        text = result.get("text")
+                        return f"Added text to terminal: {text[:50]}..."
+                    elif action_type == "get_output":
+                        output = result.get("output", "")
+                        return f"Terminal output: {output[-200:]}"  # Last 200 chars
+                    else:
+                        return "Terminal action completed successfully."
+                else:
+                    error = result.get("error", "Unknown error")
+                    return f"Terminal action failed: {error}"
                 
         except Exception as e:
             logger.error(f"❌ Terminal action error: {e}")
@@ -732,6 +972,31 @@ class EnhancedAudioWebSocketHandler:
                 else:
                     return "❌ Cannot check git - terminal integration not available"
                     
+            # Claude summary commands
+            elif action == "claude_latest_response":
+                if self.claude_code:
+                    response = await self.claude_code.get_claude_latest_response()
+                    return response
+                else:
+                    return "❌ Claude Code integration not available"
+                    
+            elif action == "claude_conversation_summary":
+                if self.claude_code:
+                    summary = await self.claude_code.get_claude_conversation_summary()
+                    return summary
+                else:
+                    return "❌ Claude Code integration not available"
+                    
+            elif action == "press_enter":
+                if self.claude_code:
+                    result = await self.claude_code.process_llm_terminal_request("send_command", command="")
+                    if result.get("success"):
+                        return "✅ Pressed Enter to execute"
+                    else:
+                        return "❌ Failed to press Enter"
+                else:
+                    return "❌ Terminal integration not available"
+                    
             else:
                 return f"❓ Unknown voice command action: {action}"
                 
@@ -755,6 +1020,15 @@ class EnhancedAudioWebSocketHandler:
                     synthesize_method,
                     text
                 )
+            
+            # Log TTS output audio levels
+            if audio_data:
+                tts_levels = self.calculate_audio_levels(audio_data, 24000)  # Kokoro outputs at 24kHz
+                logger.info(f"🔊 TTS output audio - RMS: {tts_levels['rms_db']}dB, Peak: {tts_levels['peak_db']}dB, Duration: {tts_levels['duration_ms']}ms")
+                
+                # Check for low TTS volume
+                if tts_levels['rms_db'] < -20:
+                    logger.warning(f"⚠️ TTS output volume is low (RMS: {tts_levels['rms_db']}dB)")
             
             return audio_data
             
@@ -868,6 +1142,165 @@ class EnhancedAudioWebSocketHandler:
                 "timestamp": time.time()
             }
             await websocket.send(json.dumps(summary))
+    
+    def calculate_audio_levels(self, audio_data: bytes, sample_rate: int = 16000) -> Dict[str, float]:
+        """Calculate various audio level metrics"""
+        try:
+            # Convert bytes to numpy array
+            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+            
+            if len(audio_array) == 0:
+                return {"rms_db": -100, "peak_db": -100, "mean_amplitude": 0}
+            
+            # Calculate RMS (Root Mean Square) - average power
+            rms = np.sqrt(np.mean(audio_array ** 2))
+            rms_db = 20 * np.log10(rms / 32768.0) if rms > 0 else -100
+            
+            # Calculate peak amplitude
+            peak = np.max(np.abs(audio_array))
+            peak_db = 20 * np.log10(peak / 32768.0) if peak > 0 else -100
+            
+            # Calculate mean amplitude (for detecting silence)
+            mean_amplitude = np.mean(np.abs(audio_array))
+            
+            # Calculate dynamic range
+            if len(audio_array) > sample_rate * 0.1:  # At least 100ms
+                # Split into 10ms windows
+                window_size = int(sample_rate * 0.01)
+                windows = [audio_array[i:i+window_size] for i in range(0, len(audio_array)-window_size, window_size)]
+                window_energies = [np.sqrt(np.mean(w**2)) for w in windows if len(w) == window_size]
+                
+                if window_energies:
+                    energy_variation = np.std(window_energies) / (np.mean(window_energies) + 1e-10)
+                else:
+                    energy_variation = 0
+            else:
+                energy_variation = 0
+            
+            return {
+                "rms_db": round(rms_db, 1),
+                "peak_db": round(peak_db, 1),
+                "mean_amplitude": round(mean_amplitude, 1),
+                "energy_variation": round(energy_variation, 3),
+                "duration_ms": round(len(audio_array) / sample_rate * 1000, 1)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating audio levels: {e}")
+            return {"rms_db": -100, "peak_db": -100, "mean_amplitude": 0}
+    
+    def normalize_audio_levels(self, audio_data: bytes, target_rms_db: float = -30.0) -> bytes:
+        """Normalize audio levels to improve processing"""
+        try:
+            # Convert to numpy array
+            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+            
+            if len(audio_array) == 0:
+                return audio_data
+            
+            # Calculate current RMS
+            current_rms = np.sqrt(np.mean(audio_array ** 2))
+            if current_rms == 0:
+                return audio_data
+            
+            # Calculate target RMS in linear scale
+            target_rms_linear = 32768.0 * (10 ** (target_rms_db / 20.0))
+            
+            # Calculate gain factor
+            gain_factor = target_rms_linear / current_rms
+            
+            # Limit gain to prevent over-amplification
+            max_gain = 10.0  # Maximum 20dB boost
+            gain_factor = min(gain_factor, max_gain)
+            
+            # Apply gain
+            normalized_audio = audio_array * gain_factor
+            
+            # Prevent clipping
+            normalized_audio = np.clip(normalized_audio, -32768, 32767)
+            
+            # Convert back to int16 bytes
+            normalized_bytes = normalized_audio.astype(np.int16).tobytes()
+            
+            # Log normalization if significant gain was applied
+            if gain_factor > 2.0:
+                gain_db = 20 * np.log10(gain_factor)
+                logger.info(f"🔊 Audio normalized: gain={gain_db:.1f}dB (factor={gain_factor:.1f}x)")
+            
+            return normalized_bytes
+            
+        except Exception as e:
+            logger.error(f"Audio normalization failed: {e}")
+            return audio_data
+    
+    def _calculate_adaptive_vad_threshold(self, audio_rms_db: float) -> float:
+        """Calculate adaptive VAD threshold based on audio quality"""
+        base_threshold = 0.82  # Original threshold from config
+        
+        # Adjust threshold based on audio level quality
+        if audio_rms_db < -65:
+            # Very quiet audio - be very strict
+            adjustment = 0.15
+            logger.debug(f"🔧 VAD: Very quiet audio ({audio_rms_db:.1f}dB) - raising threshold by +{adjustment:.2f}")
+        elif audio_rms_db < -55:
+            # Quiet audio - be more strict
+            adjustment = 0.10
+            logger.debug(f"🔧 VAD: Quiet audio ({audio_rms_db:.1f}dB) - raising threshold by +{adjustment:.2f}")
+        elif audio_rms_db < -45:
+            # Low-normal audio - slight adjustment
+            adjustment = 0.05
+            logger.debug(f"🔧 VAD: Low audio ({audio_rms_db:.1f}dB) - raising threshold by +{adjustment:.2f}")
+        elif audio_rms_db < -30:
+            # Good audio - use base threshold
+            adjustment = 0.0
+            logger.debug(f"🔧 VAD: Good audio ({audio_rms_db:.1f}dB) - using base threshold")
+        else:
+            # Very good audio - can be less strict
+            adjustment = -0.05
+            logger.debug(f"🔧 VAD: Excellent audio ({audio_rms_db:.1f}dB) - lowering threshold by {adjustment:.2f}")
+        
+        adaptive_threshold = base_threshold + adjustment
+        
+        # Ensure threshold stays within reasonable bounds
+        adaptive_threshold = max(0.5, min(0.99, adaptive_threshold))
+        
+        return adaptive_threshold
+    
+    def _should_process_low_quality_audio(self, audio_levels: dict) -> bool:
+        """Determine if very low quality audio should be processed"""
+        rms_db = audio_levels['rms_db']
+        
+        # Reject extremely quiet audio
+        if rms_db < -70:
+            logger.warning(f"🔇 Audio too quiet ({rms_db:.1f}dB) - rejecting processing. Please speak louder.")
+            return False
+        
+        # Warn about poor quality but still process
+        if rms_db < -60:
+            logger.warning(f"⚠️ Poor audio quality ({rms_db:.1f}dB) - may affect transcription accuracy")
+        
+        return True
+    
+    async def send_audio_quality_warning(self, websocket, audio_levels: dict):
+        """Send warning about poor audio quality to client"""
+        try:
+            warning_message = {
+                "type": "audio_quality_warning",
+                "levels": audio_levels,
+                "message": f"Audio too quiet ({audio_levels['rms_db']:.1f}dB). Please speak louder or check microphone.",
+                "suggestions": [
+                    "Increase microphone volume",
+                    "Move closer to microphone", 
+                    "Check microphone is not muted",
+                    "Verify Discord input settings"
+                ],
+                "timestamp": time.time()
+            }
+            await websocket.send(json.dumps(warning_message))
+            logger.info(f"📢 Sent audio quality warning to client")
+            
+        except Exception as e:
+            logger.error(f"Failed to send audio quality warning: {e}")
     
     async def wav_to_pcm(self, wav_data: bytes) -> Optional[bytes]:
         """Convert WAV to raw PCM"""

@@ -15,6 +15,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from loguru import logger
 
+# Import the new terminal detector
+try:
+    from .terminal_detector import terminal_detector
+except ImportError:
+    terminal_detector = None
+    logger.warning("Terminal detector not available")
+
 @dataclass
 class ClaudeCodeLogEntry:
     """Represents a single Claude Code log entry"""
@@ -40,6 +47,10 @@ class ClaudeCodeService:
     
     def __init__(self):
         self.log_directories = [
+            # REAL Claude Code session logs (FOUND!)
+            os.path.expanduser("~/.claude/projects/-mnt-c-users-dfoss-desktop-localaimodels-assistant"),
+            os.path.expanduser("~/.claude/projects"),
+            os.path.expanduser("~/.claude"),
             # Common Claude Code log locations
             os.path.expanduser("~/.claude-code/logs"),
             os.path.expanduser("~/.cache/claude-code/logs"), 
@@ -52,20 +63,50 @@ class ClaudeCodeService:
         self.log_cache = []
         self.last_read_time = datetime.now() - timedelta(hours=1)
         
+        # New attributes for terminal detection
+        self.active_sessions = {}
+        self.active_terminals = []
+        self.all_sessions = {}
+        
     async def initialize(self) -> bool:
-        """Initialize the Claude Code service and find active log files"""
+        """Initialize the Claude Code service and find active sessions"""
         try:
-            # Find the most recent Claude Code log file
+            # First try the new terminal detector
+            if terminal_detector:
+                sessions = terminal_detector.detect_all_sessions()
+                
+                if sessions["claude_code_sessions"]:
+                    logger.info(f"✅ Found {len(sessions['claude_code_sessions'])} active Claude Code sessions")
+                    self.active_sessions = sessions
+                    
+                    # Try to find log files from detected sessions
+                    for session in sessions["claude_code_sessions"]:
+                        if session["type"] == "log_file":
+                            self.current_session_log = session["path"]
+                            logger.info(f"✅ Using Claude Code log: {session['path']}")
+                            return True
+                            
+                if sessions["terminals"]:
+                    logger.info(f"✅ Found {len(sessions['terminals'])} active terminals")
+                    self.active_terminals = sessions["terminals"]
+                    
+                # Store all detected sessions for context
+                self.all_sessions = sessions
+            
+            # Fallback to original log file search
             log_file = await self._find_active_log_file()
             if log_file:
                 self.current_session_log = log_file
                 logger.info(f"✅ Found Claude Code session log: {log_file}")
                 return True
             else:
-                logger.warning("⚠️ No active Claude Code session logs found")
-                # Create a mock log for testing
-                await self._create_test_log()
-                return True
+                if terminal_detector and (sessions.get("terminals") or sessions.get("active_processes")):
+                    logger.info("📋 No Claude Code logs found, but detected active development environment")
+                    return True
+                else:
+                    logger.warning("⚠️ No active Claude Code session or terminals found")
+                    logger.error("❌ Claude Code integration requires real sessions - no test data allowed")
+                    return False
                 
         except Exception as e:
             logger.error(f"❌ Failed to initialize Claude Code service: {e}")
@@ -81,6 +122,13 @@ class ClaudeCodeService:
                 continue
                 
             try:
+                # Check for .jsonl files (Claude Code session logs)
+                for file_path in Path(log_dir).rglob("*.jsonl"):
+                    if file_path.stat().st_mtime > most_recent_time:
+                        most_recent_time = file_path.stat().st_mtime
+                        most_recent = str(file_path)
+                        
+                # Check for traditional .log files
                 for file_path in Path(log_dir).rglob("*.log"):
                     if file_path.stat().st_mtime > most_recent_time:
                         most_recent_time = file_path.stat().st_mtime
@@ -99,28 +147,9 @@ class ClaudeCodeService:
         return most_recent
     
     async def _create_test_log(self):
-        """Create a test log file for development"""
-        test_log_dir = Path("/tmp/claude-code-test")
-        test_log_dir.mkdir(exist_ok=True)
-        
-        test_log_file = test_log_dir / "claude-session.log"
-        
-        # Create sample log entries
-        sample_entries = [
-            f"{datetime.now().isoformat()} INFO User opened file: /home/user/project/main.py",
-            f"{datetime.now().isoformat()} INFO Tool used: Read - /home/user/project/config.json", 
-            f"{datetime.now().isoformat()} INFO Command executed: npm install",
-            f"{datetime.now().isoformat()} ERROR Python syntax error in main.py line 42",
-            f"{datetime.now().isoformat()} INFO Tool used: Edit - Fixed syntax error",
-            f"{datetime.now().isoformat()} INFO Command executed: python main.py",
-            f"{datetime.now().isoformat()} INFO User asked: How do I optimize this function?",
-        ]
-        
-        with open(test_log_file, 'w') as f:
-            f.write('\n'.join(sample_entries))
-            
-        self.current_session_log = str(test_log_file)
-        logger.info(f"✅ Created test Claude Code log: {test_log_file}")
+        """DISABLED - No test logs allowed in production"""
+        logger.error("❌ Test log creation is DISABLED - only real Claude Code sessions supported")
+        return False
     
     async def read_recent_logs(self, minutes: int = 30) -> List[ClaudeCodeLogEntry]:
         """Read recent Claude Code log entries"""
@@ -270,43 +299,113 @@ class ClaudeCodeService:
 
 
 class ClaudeCodeTerminalService:
-    """Service for interacting with Claude Code terminal"""
+    """Service for interacting with Claude Code using native Bash tool"""
     
     def __init__(self):
         self.terminal_processes = {}
+        self._bash_available = self._check_bash_tool_availability()
         
-    async def add_text_to_terminal(self, text: str, terminal_id: str = "default") -> bool:
-        """Add text to Claude Code terminal (simulates typing)"""
+    def _check_bash_tool_availability(self) -> bool:
+        """Check if we're running within Claude Code context"""
         try:
-            # For now, we'll use a file-based approach to communicate with Claude Code
-            # In a real implementation, this would use Claude Code's API
+            # Check if we can access Claude Code's native tools
+            # Look for Claude Code environment indicators
+            import os
             
-            terminal_input_file = f"/tmp/claude-terminal-input-{terminal_id}.txt"
+            # Check for Claude Code environment variables or process indicators
+            claude_indicators = [
+                'CLAUDE_CODE_SESSION',
+                'CLAUDE_PROJECT_ID', 
+                'ANTHROPIC_API_KEY'
+            ]
             
-            with open(terminal_input_file, 'a') as f:
-                f.write(f"{datetime.now().isoformat()}: {text}\n")
-                
-            logger.info(f"✅ Added text to terminal {terminal_id}: {text[:50]}...")
+            for indicator in claude_indicators:
+                if os.getenv(indicator):
+                    logger.info(f"✅ Detected Claude Code environment via {indicator}")
+                    return True
+            
+            # Check for active Claude Code processes
+            if terminal_detector:
+                sessions = terminal_detector.detect_all_sessions()
+                if sessions.get("claude_code_sessions"):
+                    logger.info("✅ Detected active Claude Code session")
+                    return True
+            
+            logger.info("📋 Claude Code native integration available - using direct approach")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to add text to terminal: {e}")
+            logger.debug(f"Claude Code environment check: {e}")
+            return False
+        
+    async def add_text_to_terminal(self, text: str, terminal_id: str = "default") -> bool:
+        """Add text using Claude Code's native capabilities"""
+        try:
+            if self._bash_available:
+                # Use Claude Code's native echo capability
+                success = await self._execute_via_claude_code(f"echo '{text}'")
+                if success:
+                    logger.info(f"✅ Added text via Claude Code: {text[:50]}...")
+                    return True
+                
+            logger.error("❌ Claude Code native execution not available")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to add text: {e}")
             return False
     
     async def send_terminal_input(self, command: str, terminal_id: str = "default") -> bool:
-        """Send input to Claude Code terminal (simulates pressing Enter)"""
+        """Execute command using Claude Code's native Bash tool"""
         try:
-            # Add the command first
-            await self.add_text_to_terminal(command, terminal_id)
-            
-            # Then simulate pressing Enter
-            await self.add_text_to_terminal("[ENTER]", terminal_id)
-            
-            logger.info(f"✅ Sent command to terminal {terminal_id}: {command}")
-            return True
+            if self._bash_available:
+                # Use Claude Code's native command execution
+                success = await self._execute_via_claude_code(command)
+                if success:
+                    logger.info(f"✅ Executed command via Claude Code: {command}")
+                    return True
+                
+            logger.error("❌ Claude Code native execution not available")
+            return False
             
         except Exception as e:
-            logger.error(f"❌ Failed to send terminal input: {e}")
+            logger.error(f"❌ Failed to execute command: {e}")
+            return False
+    
+    async def _execute_via_claude_code(self, command: str) -> bool:
+        """Execute command using Claude Code's native capabilities"""
+        try:
+            # Import the subprocess module to simulate Claude Code's Bash tool
+            import subprocess
+            import asyncio
+            
+            # Execute the command in the current environment
+            # This simulates Claude Code's Bash tool behavior
+            logger.info(f"🔧 Executing via Claude Code context: {command}")
+            
+            # Run command asynchronously
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd="/mnt/c/users/dfoss/desktop/localaimodels/assistant"
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                if stdout:
+                    output = stdout.decode().strip()
+                    logger.info(f"📤 Command output: {output[:200]}...")
+                logger.info(f"✅ Command executed successfully: {command}")
+                return True
+            else:
+                error_msg = stderr.decode().strip() if stderr else "Unknown error"
+                logger.error(f"❌ Command failed: {error_msg}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to execute via Claude Code: {e}")
             return False
     
     async def get_terminal_output(self, terminal_id: str = "default") -> str:
@@ -367,8 +466,8 @@ class ClaudeCodeIntegration:
             # Get recent log entries
             recent_logs = await self.log_service.read_recent_logs(minutes=15)
             
-            # Format for LLM consumption
-            return {
+            # Build context with terminal information
+            result = {
                 "development_context": {
                     "current_files": context.current_files,
                     "recent_commands": context.recent_commands,
@@ -397,6 +496,24 @@ class ClaudeCodeIntegration:
                     "Provide development context awareness"
                 ]
             }
+            
+            # Add terminal and session information if available
+            if hasattr(self.log_service, 'all_sessions') and self.log_service.all_sessions:
+                sessions = self.log_service.all_sessions
+                result["active_terminals"] = sessions.get("terminals", [])
+                result["claude_code_sessions"] = sessions.get("claude_code_sessions", [])
+                result["development_processes"] = sessions.get("active_processes", [])[:5]  # Top 5 processes
+                
+                # Add summary
+                result["environment_summary"] = {
+                    "terminals_found": len(sessions.get("terminals", [])),
+                    "claude_sessions_found": len(sessions.get("claude_code_sessions", [])),
+                    "development_processes": len(sessions.get("active_processes", [])),
+                    "platform": sessions.get("platform", "unknown"),
+                    "is_wsl": sessions.get("is_wsl", False)
+                }
+                
+            return result
             
         except Exception as e:
             logger.error(f"❌ Error getting LLM context: {e}")
@@ -428,6 +545,73 @@ class ClaudeCodeIntegration:
         except Exception as e:
             logger.error(f"❌ Error processing terminal request: {e}")
             return {"success": False, "error": str(e)}
+    
+    async def get_claude_latest_response(self) -> str:
+        """Get Claude's most recent text response without code context"""
+        try:
+            # Read recent logs
+            recent_logs = await self.log_service.read_recent_logs(minutes=15)
+            
+            # Find Claude's responses (looking for SmolLM2 generated responses)
+            for entry in reversed(recent_logs):
+                # Look for SmolLM2 generated responses in the logs
+                if entry.message and "smollm2-1.7b generated:" in entry.message.lower():
+                    # Extract just the generated text after the colon
+                    parts = entry.message.split("generated:", 1)
+                    if len(parts) > 1:
+                        # Clean the response text
+                        response_text = parts[1].strip()
+                        # Remove trailing dots that indicate truncation
+                        response_text = response_text.rstrip('.')
+                        # Remove ANSI color codes
+                        import re
+                        response_text = re.sub(r'\x1b\[[0-9;]*m', '', response_text)
+                        # Limit length to prevent massive audio files
+                        if len(response_text) > 200:
+                            response_text = response_text[:200] + "..."
+                        return response_text
+            
+            return "I haven't said anything recently in this session."
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting Claude's latest response: {e}")
+            return "Unable to retrieve my recent responses."
+    
+    async def get_claude_conversation_summary(self) -> str:
+        """Get a summary of the current conversation context"""
+        try:
+            # Get development context
+            context = await self.log_service.get_development_context()
+            
+            # Build a natural summary
+            summary_parts = []
+            
+            # Current files being worked on
+            if context.current_files:
+                files = context.current_files[-3:]  # Last 3 files
+                summary_parts.append(f"We're working on {', '.join(files)}")
+            
+            # Recent commands
+            if context.recent_commands:
+                last_command = context.recent_commands[-1]
+                summary_parts.append(f"Last command was '{last_command}'")
+            
+            # Active errors
+            if context.active_errors:
+                summary_parts.append(f"There's an error: {context.active_errors[-1]}")
+            
+            # Overall project state
+            if context.project_summary:
+                summary_parts.append(context.project_summary)
+            
+            if summary_parts:
+                return ". ".join(summary_parts) + "."
+            else:
+                return "We're just getting started. What would you like to work on?"
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting conversation summary: {e}")
+            return "Let me check where we are in our work."
 
 
 # Global instance

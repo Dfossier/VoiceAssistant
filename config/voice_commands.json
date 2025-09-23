@@ -29,6 +29,11 @@
         "description": "Add text to Claude Code terminal without executing"
       },
       {
+        "trigger": ["press enter", "send", "execute that", "run that"],
+        "action": "press_enter",
+        "description": "Press Enter to execute the current terminal input"
+      },
+      {
         "trigger": ["show terminal", "terminal output", "what's in terminal"],
         "action": "get_output",
         "description": "Get recent terminal output"
@@ -76,6 +81,28 @@
         "trigger": ["recent commands", "command history", "what commands"],
         "action": "recent_commands", 
         "description": "Show recently executed commands"
+      }
+    ],
+    "claude_summary": [
+      {
+        "trigger": ["give me an update", "give me the update", "what's the update"],
+        "action": "claude_latest_response",
+        "description": "Get Claude's latest response without code context"
+      },
+      {
+        "trigger": ["what's the latest", "what is the latest", "latest update"],
+        "action": "claude_latest_response",
+        "description": "Get Claude's most recent text response"
+      },
+      {
+        "trigger": ["what did claude say", "what claude said", "claude's response"],
+        "action": "claude_latest_response",
+        "description": "Retrieve Claude's last message text only"
+      },
+      {
+        "trigger": ["where are we", "current status", "where we at"],
+        "action": "claude_conversation_summary",
+        "description": "Get a summary of the current conversation context"
       }
     ]
   },
