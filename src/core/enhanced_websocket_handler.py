@@ -324,8 +324,13 @@ class EnhancedAudioWebSocketHandler:
     async def periodic_metrics_report(self):
         """Periodically report pipeline metrics"""
         while self.is_running:
-            await asyncio.sleep(60)  # Report every minute
-            pipeline_metrics.print_summary()
+            await asyncio.sleep(300)  # Report every 5 minutes instead of 1 minute
+            # Only print summary if we have actual data
+            stats = pipeline_metrics.get_statistics()
+            if stats.get("total_traces", 0) > 0:
+                pipeline_metrics.print_summary()
+            else:
+                logger.debug("📊 No pipeline activity to report")
     
     async def handle_client(self, websocket, path):
         """Handle a WebSocket client connection with metrics"""
