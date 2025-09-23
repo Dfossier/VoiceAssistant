@@ -163,23 +163,40 @@ class PipelineMetrics:
                 
         return trace
     
+    def _convert_to_json_serializable(self, obj):
+        """Convert numpy types and other non-serializable objects to JSON-compatible types"""
+        if isinstance(obj, dict):
+            return {k: self._convert_to_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_json_serializable(item) for item in obj]
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif hasattr(obj, 'item'):  # numpy scalars
+            return obj.item()
+        else:
+            return obj
+
     def _log_trace_to_file(self, trace: PipelineTrace):
         """Log trace data to file"""
         try:
             trace_data = {
                 "timestamp": datetime.now().isoformat(),
                 "trace_id": trace.trace_id,
-                "total_duration_ms": trace.total_duration_ms,
+                "total_duration_ms": float(trace.total_duration_ms) if trace.total_duration_ms else None,
                 "events": [
                     {
                         "component": e.component,
                         "operation": e.operation,
-                        "duration_ms": e.duration_ms,
-                        "metadata": e.metadata
+                        "duration_ms": float(e.duration_ms) if e.duration_ms else None,
+                        "metadata": self._convert_to_json_serializable(e.metadata)
                     }
                     for e in trace.events
                 ],
-                "metadata": trace.metadata
+                "metadata": self._convert_to_json_serializable(trace.metadata)
             }
             
             with open(self.current_log_file, 'a') as f:

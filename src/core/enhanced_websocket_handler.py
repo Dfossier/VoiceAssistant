@@ -463,8 +463,13 @@ class EnhancedAudioWebSocketHandler:
             audio_levels = self.calculate_audio_levels(audio_data, sample_rate)
             logger.info(f"🎚️ Audio levels - RMS: {audio_levels['rms_db']}dB, Peak: {audio_levels['peak_db']}dB, Duration: {audio_levels['duration_ms']}ms")
             
+            # Quick speech detection for audio quality assessment
+            # Use energy-based heuristic: speech typically has RMS > -50dB and energy variation
+            energy_variation = audio_levels.get('energy_variation', 0)
+            likely_speech = audio_levels['rms_db'] > -50 and energy_variation > 0.1
+            
             # Check if we should process this audio quality
-            if not self._should_process_low_quality_audio(audio_levels):
+            if not self._should_process_low_quality_audio(audio_levels, likely_speech):
                 await self.send_audio_quality_warning(websocket, audio_levels)
                 return
             
@@ -1266,7 +1271,7 @@ class EnhancedAudioWebSocketHandler:
         
         return adaptive_threshold
     
-    def _should_process_low_quality_audio(self, audio_levels: dict) -> bool:
+    def _should_process_low_quality_audio(self, audio_levels: dict, is_speech_detected: bool = None) -> bool:
         """Determine if very low quality audio should be processed"""
         rms_db = audio_levels['rms_db']
         
@@ -1275,9 +1280,13 @@ class EnhancedAudioWebSocketHandler:
             logger.warning(f"🔇 Audio too quiet ({rms_db:.1f}dB) - rejecting processing. Please speak louder.")
             return False
         
-        # Warn about poor quality but still process
-        if rms_db < -60:
-            logger.warning(f"⚠️ Poor audio quality ({rms_db:.1f}dB) - may affect transcription accuracy")
+        # Only warn about poor quality during detected speech periods
+        # This prevents spam warnings during silence/background noise
+        if rms_db < -60 and is_speech_detected:
+            logger.warning(f"⚠️ Poor speech quality ({rms_db:.1f}dB) - may affect transcription accuracy")
+        elif rms_db < -55 and not is_speech_detected:
+            # Just log quietly for background/silence periods
+            logger.debug(f"🔇 Background audio ({rms_db:.1f}dB) - likely silence or background noise")
         
         return True
     
