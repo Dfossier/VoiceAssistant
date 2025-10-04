@@ -1,5 +1,6 @@
 """FastAPI server setup and configuration"""
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
@@ -125,13 +126,19 @@ async def lifespan(app: FastAPI):
         
         # Start Enhanced handler with all optimizations
         try:
+            logger.debug("Attempting to import EnhancedAudioWebSocketHandler...")
             from .enhanced_websocket_handler import EnhancedAudioWebSocketHandler
+            logger.debug("Import successful")
             
             # Create and initialize enhanced handler
+            logger.debug("Creating EnhancedAudioWebSocketHandler instance...")
             enhanced_handler = EnhancedAudioWebSocketHandler(host="0.0.0.0", port=8002)
+            logger.debug("Instance created successfully")
             
             # Start the enhanced server
+            logger.debug("Starting enhanced server...")
             await enhanced_handler.start_server()
+            logger.debug("Server started successfully")
             
             # Store reference for cleanup
             app.state.enhanced_handler = enhanced_handler
@@ -141,7 +148,9 @@ async def lifespan(app: FastAPI):
             voice_pipeline_started = True
             
         except Exception as e:
+            import traceback
             logger.error(f"❌ Failed to start Enhanced WebSocket Handler: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             logger.info("🔄 Falling back to SimpleAudioWebSocketHandler...")
             
             # Fallback to simple handler
@@ -362,49 +371,14 @@ def register_routes(app: FastAPI):
                         "text": text
                     }
                 else:
-                    logger.warning("Local TTS failed, falling back to OpenAI")
+                    logger.error(f"❌ Local TTS failed for: '{text[:50]}...'")
+                    logger.error(f"❌ No fallback TTS will be attempted")
+                    return {"error": "TTS synthesis failed - Kokoro not working", "success": False}
             
-            # Fallback to OpenAI TTS
-            logger.info("Using OpenAI TTS for synthesis")
-            import base64
-            from openai import OpenAI
-            
-            # Initialize OpenAI client
-            client = OpenAI()
-            
-            # Map voice names to OpenAI voices
-            voice_map = {
-                "default": "alloy",
-                "alloy": "alloy",
-                "echo": "echo", 
-                "fable": "fable",
-                "onyx": "onyx",
-                "nova": "nova",
-                "shimmer": "shimmer"
-            }
-            
-            voice = voice_map.get(voice_id, "alloy")
-            
-            # Generate speech
-            response = client.audio.speech.create(
-                model="tts-1",
-                voice=voice,
-                input=text
-            )
-            
-            # Convert audio to base64
-            audio_data = response.content
-            audio_base64 = base64.b64encode(audio_data).decode()
-            
-            logger.info(f"OpenAI TTS successful for: '{text[:100]}...' (voice: {voice})")
-            return {
-                "audio_data": audio_base64,
-                "format": "mp3",
-                "voice": voice,
-                "success": True,
-                "model": "openai_tts",
-                "text": text
-            }
+            # No local TTS available
+            logger.error(f"❌ No local TTS model available")
+            logger.error(f"❌ Cannot synthesize: '{text[:50]}...'")
+            return {"error": "TTS model not available", "success": False}
             
         except Exception as e:
             logger.error(f"Error generating TTS: {e}")
@@ -550,6 +524,136 @@ def register_routes(app: FastAPI):
         except Exception as e:
             logger.error(f"Error getting API status: {e}")
             return {"error": str(e)}
+    
+    @app.get("/api/system/status")
+    async def get_system_status():
+        """Get system status in dashboard-compatible format"""
+        from datetime import datetime
+        
+        # Get backend status
+        backend_status = {
+            "name": "backend",
+            "status": "running",
+            "pid": os.getpid(),
+            "uptime": 0  # Would need to track actual start time
+        }
+        
+        # Voice pipeline status
+        voice_status = {
+            "name": "voice_pipeline",
+            "status": "running"  # WebSocket handler is always running
+        }
+        
+        # Discord bot status - check if there are active WebSocket connections
+        # This is a simple heuristic - if there are active connections on port 8002, 
+        # likely the Discord bot is connected
+        try:
+            import subprocess
+            result = subprocess.run(['netstat', '-an'], capture_output=True, text=True, timeout=5)
+            has_websocket_connection = ':8002' in result.stdout and 'ESTABLISHED' in result.stdout
+        except:
+            has_websocket_connection = False
+            
+        discord_status = {
+            "name": "discord_bot",
+            "status": "running" if has_websocket_connection else "stopped"
+        }
+        
+        # Get Claude Code and terminal status
+        try:
+            from .terminal_detector import terminal_detector
+            sessions = terminal_detector.detect_all_sessions()
+            claude_code_active = len(sessions.get("claude_code_sessions", [])) > 0
+            terminals_active = len(sessions.get("terminals", []))
+            logger.debug(f"🔍 System status: {len(sessions.get('claude_code_sessions', []))} Claude Code sessions, {terminals_active} terminals")
+        except Exception as e:
+            logger.error(f"Error detecting sessions for system status: {e}")
+            claude_code_active = False
+            terminals_active = 0
+        
+        return {
+            "backend": backend_status,
+            "voice_pipeline": voice_status,
+            "discord_bot": discord_status,
+            "claude_code_active": claude_code_active,
+            "terminals_active": terminals_active,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    @app.get("/api/system/logs/sources")
+    async def get_log_sources():
+        """Get available log sources"""
+        return {"sources": ["backend", "discord", "voice", "system", "proxy"]}
+    
+    @app.get("/api/system/logs")
+    async def get_system_logs(source: str = "backend", lines: int = 100):
+        """Get system logs from specified source"""
+        try:
+            import os
+            
+            # Map sources to their actual log file paths
+            log_file_map = {
+                "backend": ["backend_production.log", "backend_new.log", "backend.log"],
+                "discord": ["WindowsDiscordBot/logs/discord_bot.log", "discord.log"],
+                "voice": ["backend_production.log", "backend_new.log", "backend.log"],  # Voice logs are filtered from backend
+                "system": ["system.log", "startup.log"],
+                "proxy": ["proxy.log", "WindowsDiscordBot/proxy.log"]
+            }
+            
+            log_file = None
+            
+            if source in log_file_map:
+                # Try each potential log file for this source
+                for potential_file in log_file_map[source]:
+                    if os.path.exists(potential_file):
+                        log_file = potential_file
+                        break
+                if not log_file:
+                    # If no file found, use the first option as default
+                    log_file = log_file_map[source][0]
+            else:
+                log_file = f"{source}.log"
+                
+            if not os.path.exists(log_file):
+                return {"logs": [], "source": source, "message": f"Log file {log_file} not found"}
+            
+            # Read last N lines
+            with open(log_file, 'r') as f:
+                all_lines = f.readlines()
+                
+            # Filter for voice-related logs if this is the voice source
+            if source == "voice":
+                voice_keywords = [
+                    "voice", "tts", "stt", "whisper", "kokoro", "vad", "audio", 
+                    "speech", "transcrib", "synthesis", "smart_turn", "pipeline",
+                    "websocket", "audio_input", "audio_output", "Audio", "Voice",
+                    "TTS", "STT", "VAD", "WebSocket"
+                ]
+                
+                # Filter lines that contain voice-related keywords
+                filtered_lines = []
+                for line in all_lines:
+                    line_lower = line.lower()
+                    if any(keyword.lower() in line_lower for keyword in voice_keywords):
+                        filtered_lines.append(line)
+                
+                all_lines = filtered_lines
+                
+            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            # Strip ANSI color codes from logs
+            import re
+            ansi_escape = re.compile(r"\x1B(?:\[[0-?]*[ -/]*[@-~])")
+            cleaned_lines = [ansi_escape.sub("", line) for line in recent_lines]
+                
+            return {
+                "logs": [line.strip() for line in cleaned_lines],
+                "source": source,
+                "total_lines": len(all_lines),
+                "returned_lines": len(recent_lines)
+            }
+        except Exception as e:
+            logger.error(f"Error getting system logs: {e}")
+            return {"error": str(e), "logs": []}
     
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
