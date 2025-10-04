@@ -16,8 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 # Debug patch disabled for now
 # try:
-#     from debug_websocket_transport import patch_pipecat_websocket
-#     patch_pipecat_websocket()
 # except ImportError:
 #     logger.warning("Debug WebSocket patch not available")
 

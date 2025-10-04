@@ -1093,7 +1093,6 @@ async def handle_voice_request(data: Dict[str, Any]) -> Dict[str, Any]:
                 "features": {
                     "browser_speech_api": True,
                     "text_to_speech": TTS_AVAILABLE if 'TTS_AVAILABLE' in globals() else False,
-                    "pipecat_mode": False  # TODO: Check actual Pipecat availability
                 }
             }
             

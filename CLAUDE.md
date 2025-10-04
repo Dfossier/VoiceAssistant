@@ -342,10 +342,6 @@ tail -f backend.log
 # Check model files
 ls -la /mnt/c/users/dfoss/desktop/localaimodels/
 
-# Verify Pipecat installation
-pip list | grep pipecat
-
-# Test WebSocket connection
 python test_pipecat_format.py
 ```
 

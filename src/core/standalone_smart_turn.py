@@ -1,6 +1,6 @@
 """
 Standalone Smart Turn VAD v3 Wrapper
-Based on actual Smart Turn implementation from pipecat-ai/smart-turn-v3
+Standalone implementation based on Smart Turn V3 algorithm
 Works independently without Pipecat dependencies
 """
 

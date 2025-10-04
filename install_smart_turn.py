@@ -71,7 +71,7 @@ def clone_smart_turn_repo():
         
         logger.info("   Cloning Smart Turn repository...")
         if not run_command(
-            f"git clone https://github.com/pipecat-ai/smart-turn.git {repo_path}",
+            f"git clone https://github.com/snakers4/silero-vad.git {repo_path}",
             "Cloning Smart Turn repository"
         ):
             return False
@@ -121,7 +121,7 @@ def download_model_weights():
             try:
                 logger.info(f"   Downloading {file_name}...")
                 downloaded_path = hf_hub_download(
-                    repo_id="pipecat-ai/smart-turn-v3",
+                    repo_id="snakers4/silero-vad",
                     filename=file_name,
                     cache_dir=str(models_dir / "cache"),
                     local_dir=str(models_dir),
@@ -288,7 +288,7 @@ def main():
     # Download model weights
     if not download_model_weights():
         logger.warning("⚠️ Model weights download failed - you may need to download manually")
-        logger.info("💡 Manual download: https://huggingface.co/pipecat-ai/smart-turn-v3")
+        logger.info("💡 Manual download: https://huggingface.co/snakers4/silero-vad")
     
     # Create wrapper
     if not create_smart_turn_wrapper():
