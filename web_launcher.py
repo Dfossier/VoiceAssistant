@@ -12,6 +12,7 @@ import os
 import sys
 import signal
 import time
+import asyncio
 import psutil
 from pathlib import Path
 import threading
@@ -410,50 +411,38 @@ async def get_status():
     return manager.get_status()
 
 @app.get("/logs")
-async def get_logs():
-    """Get service logs"""
-    return manager.logs
+async def get_logs(limit: int = 50):
+    """Get service logs with pagination"""
+    try:
+        if not hasattr(manager, 'logs') or not isinstance(manager.logs, list):
+            return {"logs": [], "error": "Logs not available"}
+        
+        # Validate and filter logs
+        valid_logs = []
+        for log in manager.logs:
+            if isinstance(log, dict) and all(k in log for k in ['time', 'service', 'message']):
+                valid_logs.append(log)
+        
+        # Return most recent logs up to limit
+        recent_logs = valid_logs[-limit:] if len(valid_logs) > limit else valid_logs
+        
+        return {
+            "logs": recent_logs,
+            "total": len(valid_logs),
+            "returned": len(recent_logs),
+            "limit": limit
+        }
+    except Exception as e:
+        return {"logs": [], "error": f"Failed to retrieve logs: {str(e)}"}
 
 @app.post("/start-all")
 async def start_all():
     """Start all services"""
-    manager.start_backend()
-    time.sleep(2)
-    manager.start_bot()
-    return {"message": "Starting all services"}
-
-@app.post("/stop-all")
-async def stop_all():
-    """Stop all services"""
-    manager.stop_bot()
-    manager.stop_backend()
-    return {"message": "Stopping all services"}
-
-@app.post("/start-backend")
-async def start_backend():
-    """Start backend service"""
-    manager.start_backend()
-    return {"message": "Starting backend"}
-
-@app.post("/stop-backend")
-async def stop_backend():
-    """Stop backend service"""
-    manager.stop_backend()
-    return {"message": "Stopping backend"}
-
-@app.post("/start-bot")
-async def start_bot():
-    """Start bot service"""
-    manager.start_bot()
-    return {"message": "Starting bot"}
-
-@app.post("/stop-bot")
-async def stop_bot():
-    """Stop bot service"""
-    manager.stop_bot()
-    return {"message": "Stopping bot"}
-
-if __name__ == "__main__":
-    print("🚀 Starting AI Assistant Web Launcher...")
-    print("📱 Open your browser to: http://localhost:9000")
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    try:
+        # Start backend first, then wait, then start bot
+        manager.start_backend()
+        await asyncio.sleep(2)
+        manager.start_bot()
+        return {"message": "Starting all services"}
+    except Exception as e:
+        return {"error": f"Failed to start services: {str(e)}"}
