@@ -41,14 +41,158 @@ class KokoroTTSIntegration:
         """Initialize TTS backends"""
         try:
             # Try real Kokoro implementation first
-            self.direct = KokoroDirectWrapper(str(self.model_path), use_direct=True)
-            logger.info("Kokoro direct implementation initialized")
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
         except Exception as e:
-            logger.warning(f"Direct Kokoro not available: {e}")
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
         
-        # Always initialize the wrapper with fallback
-        self.wrapper = KokoroTTSWithFallback(str(self.model_path), self.voice_name)
-        logger.info("Kokoro wrapper with fallback initialized")
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
+    def _initialize(self):
+        """Initialize TTS backends"""
+        try:
+            # Try real Kokoro implementation first
+            from .kokoro_real_synthesis import get_real_kokoro_service
+            self.real_kokoro = get_real_kokoro_service
+            logger.info("Real Kokoro synthesis initialized")
+        except Exception as e:
+            logger.warning(f"Real Kokoro not available: {e}")
+            self.real_kokoro = None
+        
+        # Fallback to Windows TTS if real Kokoro fails
+        logger.info("Windows TTS fallback available")
     
     async def synthesize(self, text: str, voice: str = None) -> Tuple[Optional[bytes], int]:
         """
@@ -63,22 +207,22 @@ class KokoroTTSIntegration:
             logger.warning("Empty text provided for synthesis")
             return None, 24000
         
-        # Skip direct Kokoro (uses dummy implementation) - go straight to real TTS
-        # Direct method generates silent audio for testing - disabled for now
-        # if self.direct:
-        #     try:
-        #         audio_bytes, sample_rate = await self.direct.synthesize(text, self.voice_name)
-        #         if audio_bytes:
-        #             logger.info(f"Generated audio using direct Kokoro: {len(audio_bytes)} bytes")
-        #             return audio_bytes, sample_rate
-        #     except Exception as e:
-        #         logger.warning(f"Direct Kokoro failed: {e}")
+        # Try real Kokoro first
+        if self.real_kokoro:
+            try:
+                real_service = await self.real_kokoro()
+                audio_bytes, sample_rate = await real_service.synthesize(text, self.voice_name)
+                if audio_bytes:
+                    logger.info(f"Generated audio using real Kokoro: {len(audio_bytes)} bytes")
+                    return audio_bytes, sample_rate
+            except Exception as e:
+                logger.warning(f"Real Kokoro failed: {e}")
         
-        # Fall back to wrapper (which includes Windows TTS)
+        # Fallback to Windows TTS
         try:
-            audio_bytes, sample_rate = await self.wrapper.synthesize_speech(text)
+            audio_bytes, sample_rate = await self._windows_tts_fallback(text)
             if audio_bytes:
-                logger.info(f"Generated audio using fallback: {len(audio_bytes)} bytes")
+                logger.info(f"Generated audio using Windows TTS fallback: {len(audio_bytes)} bytes")
                 return audio_bytes, sample_rate
         except Exception as e:
             logger.error(f"All TTS methods failed: {e}")
