@@ -433,7 +433,7 @@ class LocalModelManager:
             # Optimized audio preprocessing - single operation instead of multiple conversions
             import numpy as np
             import torch
-            audio_array = np.frombuffer(audio_data, dtype=np.int16) * (1.0/32768.0)
+            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
             
             # Improved model persistence checking
             if not self._is_whisper_model_ready():
