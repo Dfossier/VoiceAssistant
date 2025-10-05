@@ -131,10 +131,11 @@ class EnhancedAudioWebSocketHandler:
         
         # Initialize Smart Turn VAD
         self.vad = SmartTurnVAD(
+            # use_optimized parameter removed - not supported by SmartTurnVAD
             confidence_threshold=vad_config.confidence_threshold,
             min_audio_length=vad_config.min_audio_length,
             sample_rate=vad_config.sample_rate,
-            use_optimized=True
+            
         )
         
         # VAD tuner for dynamic optimization
@@ -332,7 +333,7 @@ class EnhancedAudioWebSocketHandler:
             else:
                 logger.debug("📊 No pipeline activity to report")
     
-    async def handle_client(self, websocket, path):
+    async def handle_client(self, websocket):
         """Handle a WebSocket client connection with metrics"""
         client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         logger.info(f"✅ New client connected: {client_id}")
