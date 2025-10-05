@@ -40,7 +40,7 @@ class KokoroTTSIntegration:
     def _initialize(self):
         """Initialize TTS backends"""
         try:
-            # Try direct implementation first
+            # Try real Kokoro implementation first
             self.direct = KokoroDirectWrapper(str(self.model_path), use_direct=True)
             logger.info("Kokoro direct implementation initialized")
         except Exception as e:
@@ -144,3 +144,52 @@ if __name__ == "__main__":
     )
     
     asyncio.run(test_integration())
+    async def _windows_tts_fallback(self, text: str) -> Tuple[Optional[bytes], int]:
+        """Windows SAPI TTS fallback for when Kokoro fails"""
+        try:
+            import subprocess
+            import tempfile
+            import os
+            
+            # Create a temporary WAV file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+            
+            # Escape text for PowerShell
+            escaped_text = text.replace('"', '\\"').replace("'", "\\'")
+            
+            # PowerShell command for TTS
+            ps_command = f'''
+            Add-Type -AssemblyName System.Speech;
+            $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+            $synth.SetOutputToWaveFile("{temp_path}");
+            $synth.Speak("{escaped_text}");
+            $synth.Dispose();
+            '''
+            
+            # Run PowerShell command
+            result = await asyncio.create_subprocess_exec(
+                "powershell.exe", "-Command", ps_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            await result.wait()
+            
+            if result.returncode == 0 and os.path.exists(temp_path):
+                # Read the WAV file and extract PCM data
+                with open(temp_path, "rb") as f:
+                    wav_data = f.read()
+                
+                # Remove WAV header (44 bytes) and return PCM data
+                if len(wav_data) > 44:
+                    pcm_data = wav_data[44:]
+                    os.unlink(temp_path)
+                    return pcm_data, 22050  # Windows TTS typically uses 22kHz
+            
+            os.unlink(temp_path) if os.path.exists(temp_path) else None
+            
+        except Exception as e:
+            logger.error(f"Windows TTS fallback failed: {e}")
+        
+        return None, 22050
