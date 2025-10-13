@@ -1,0 +1,38 @@
+2025-10-04 00:07:31.085 | INFO     | src.core.misaki_espeak_fix:apply_misaki_espeak_fix:12 - 🔧 Applying misaki espeak WSL2 fix...
+2025-10-04 00:07:31.629 | INFO     | src.core.misaki_espeak_fix:apply_misaki_espeak_fix:69 - ✅ Phonemizer patched
+2025-10-04 00:07:31.629 | INFO     | src.core.misaki_espeak_fix:apply_misaki_espeak_fix:72 - 🔧 Patching EspeakWrapper before misaki import...
+2025-10-04 00:07:31.629 | INFO     | src.core.misaki_espeak_fix:apply_misaki_espeak_fix:102 - ✅ EspeakWrapper patched successfully
+[32m00:07:35[0m | [36mmisaki_espeak_fix:85[0m | [1m    INFO[0m | [1m🔇 EspeakWrapper.set_library patched: /home/dfoss/.local/lib/python3.12/site-packages/espeakng_loader/libespeak-ng.so[0m
+[32m00:07:35[0m | [36mmisaki_espeak_fix:93[0m | [1m    INFO[0m | [1m🔇 EspeakWrapper.set_data_path patched: /home/dfoss/.local/lib/python3.12/site-packages/espeakng_loader/espeak-ng-data[0m
+/home/dfoss/.local/lib/python3.12/site-packages/torch/nn/modules/rnn.py:123: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
+  warnings.warn(
+/home/dfoss/.local/lib/python3.12/site-packages/torch/nn/utils/weight_norm.py:144: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
+  WeightNorm.apply(module, name, dim)
+error: externally-managed-environment
+
+× This environment is externally managed
+╰─> To install Python packages system-wide, try apt install
+    python3-xyz, where xyz is the package you are trying to
+    install.
+    
+    If you wish to install a non-Debian-packaged Python package,
+    create a virtual environment using python3 -m venv path/to/venv.
+    Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make
+    sure you have python3-full installed.
+    
+    If you wish to install a non-Debian packaged Python application,
+    it may be easiest to use pipx install xyz, which will manage a
+    virtual environment for you. Make sure you have pipx installed.
+    
+    See /usr/share/doc/python3.12/README.venv for more information.
+
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+🧪 Testing Kokoro loading...
+🔧 Applying fix...
+📦 Importing Kokoro...
+✅ Kokoro imported successfully!
+🔄 Creating model...
+✅ Model created!
+🔄 Creating pipeline...
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.

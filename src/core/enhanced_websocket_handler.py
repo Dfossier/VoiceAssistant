@@ -126,17 +126,19 @@ class EnhancedAudioWebSocketHandler:
         self.is_running = False
         self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
         
-        # Audio buffering with Smart Turn VAD
+        # Audio buffering - use Whisper VAD instead of Smart Turn
         self.audio_sessions: Dict[str, Dict[str, Any]] = {}
+        self.use_whisper_vad = True  # Use Whisper's built-in VAD
         
-        # Initialize Smart Turn VAD
-        self.vad = SmartTurnVAD(
-            # use_optimized parameter removed - not supported by SmartTurnVAD
-            confidence_threshold=vad_config.confidence_threshold,
-            min_audio_length=vad_config.min_audio_length,
-            sample_rate=vad_config.sample_rate,
-            
-        )
+        # Initialize Smart Turn VAD only if not using Whisper VAD
+        if not self.use_whisper_vad:
+            self.vad = SmartTurnVAD(
+                confidence_threshold=vad_config.confidence_threshold,
+                min_audio_length=vad_config.min_audio_length,
+                sample_rate=vad_config.sample_rate,
+            )
+        else:
+            self.vad = None
         
         # VAD tuner for dynamic optimization
         self.vad_tuner = VADTuner(vad_config)
@@ -187,13 +189,16 @@ class EnhancedAudioWebSocketHandler:
     
     async def initialize(self):
         """Initialize all components"""
-        # Initialize Smart Turn VAD
-        logger.info("🔄 Initializing Smart Turn VAD...")
-        vad_initialized = await self.vad.initialize()
-        if vad_initialized:
-            logger.info("✅ Smart Turn VAD initialized successfully")
+        # Initialize VAD system
+        if self.use_whisper_vad:
+            logger.info("🔄 Using Whisper's built-in VAD (Smart Turn VAD disabled)")
         else:
-            logger.error("❌ Failed to initialize Smart Turn VAD")
+            logger.info("🔄 Initializing Smart Turn VAD...")
+            vad_initialized = await self.vad.initialize()
+            if vad_initialized:
+                logger.info("✅ Smart Turn VAD initialized successfully")
+            else:
+                logger.error("❌ Failed to initialize Smart Turn VAD")
             
         # Initialize Claude Code integration
         if self.claude_code:
@@ -301,6 +306,7 @@ class EnhancedAudioWebSocketHandler:
                 return
             
             logger.info(f"🚀 Starting enhanced audio WebSocket server on {self.host}:{self.port}")
+            logger.info(f"🔧 websockets.serve parameters: host={self.host}, port={self.port}")
             
             self.server = await websockets.serve(
                 self.handle_client,
@@ -385,8 +391,8 @@ class EnhancedAudioWebSocketHandler:
                 "optimized_inference": True
             },
             "vad_config": {
-                "confidence_threshold": self.vad.confidence_threshold,
-                "min_audio_length": self.vad.min_audio_length,
+                "confidence_threshold": self.vad.confidence_threshold if self.vad else "whisper_vad",
+                "min_audio_length": self.vad.min_audio_length if self.vad else "whisper_vad",
                 "model": "smart-turn-v3"
             },
             "supported_formats": ["wav", "pcm16"],
@@ -481,92 +487,67 @@ class EnhancedAudioWebSocketHandler:
             
             # Apply audio normalization if needed (for audio that's too quiet but not rejected)
             if audio_levels['rms_db'] < -45:
-                logger.debug(f"🔧 Applying audio normalization (current RMS: {audio_levels['rms_db']}dB)")
                 audio_data = self.normalize_audio_levels(audio_data, target_rms_db=-35.0)
-                # Recalculate levels after normalization
-                normalized_levels = self.calculate_audio_levels(audio_data, sample_rate)
-                logger.info(f"🔊 Post-normalization levels - RMS: {normalized_levels['rms_db']}dB, Peak: {normalized_levels['peak_db']}dB")
+                # Reduced logging for performance
+                logger.debug(f"🔊 Audio normalized: {audio_levels['rms_db']:.1f}dB → -35.0dB")
             
             # Check if audio is too quiet (likely silence)
             if audio_levels['rms_db'] < -50:
                 logger.debug(f"🔇 Very quiet audio detected (RMS: {audio_levels['rms_db']}dB)")
             
-            # Add to VAD buffer
-            with MetricsContext(trace_id, "vad", "buffer_processing", 
-                              audio_rms_db=audio_levels['rms_db'], 
-                              audio_peak_db=audio_levels['peak_db'],
-                              audio_duration_ms=audio_levels['duration_ms']) as ctx:
-                buffer_ready = self.vad.add_audio_chunk(audio_data)
-                session["audio_buffer"].extend(audio_data)
-                session["total_audio_processed"] += len(audio_data)
+            # Add audio to buffer
+            session["audio_buffer"].extend(audio_data)
+            session["total_audio_processed"] += len(audio_data)
             
-            # Check for turn end if buffer is ready
-            if buffer_ready:
-                # Audio quality check - warn but don't block
-                if audio_levels['rms_db'] < -70:
-                    logger.warning(f"⚠️ Very poor audio quality ({audio_levels['rms_db']:.1f}dB) - may affect recognition")
-                    # Continue processing but warn about quality
+            if self.use_whisper_vad:
+                # Simple time-based buffering for Whisper VAD
+                buffer_duration = len(session["audio_buffer"]) / (sample_rate * 2)  # 2 bytes per sample for int16
                 
-                # Use FIXED VAD threshold from config (NO ADAPTIVE ADJUSTMENTS)
-                # This prevents over-sensitivity and maintains our configured settings
-                fixed_threshold = self.vad.confidence_threshold  # Use our 0.92 setting
+                # Send audio for transcription every 8 seconds to reduce fragmentation
+                should_transcribe = (
+                    buffer_duration >= 8.0 or  # 8 second buffering to capture complete thoughts
+                    (buffer_duration >= 6.0 and audio_levels['rms_db'] > -35)  # Speech detected after 6s minimum
+                )
                 
-                with MetricsContext(trace_id, "vad", "inference") as vad_ctx:
-                    is_turn_end, confidence, vad_metadata = await self.vad.detect_turn_end()
-                    
-                    # Add confidence and decision to metrics context
-                    if vad_ctx.event:
-                        vad_ctx.event.metadata.update({
-                            'vad_confidence': confidence,
-                            'vad_decision': is_turn_end,
-                            'vad_threshold': fixed_threshold,
-                            'vad_threshold_original': fixed_threshold,
-                            'adaptive_disabled': True
-                        })
-                    
-                    # Log VAD confidence and decision with FIXED threshold info
-                    logger.info(f"🎯 VAD Decision - Turn End: {'YES' if is_turn_end else 'NO'}, Confidence: {confidence:.2f}")
-                    logger.info(f"🎯 VAD Threshold: {fixed_threshold:.2f} (FIXED - no adaptive adjustments)")
-                    logger.info(f"🎯 Audio Quality: {audio_levels['rms_db']:.1f}dB RMS, {audio_levels['peak_db']:.1f}dB peak")
-                    
-                    # Additional debug info for VAD metadata
-                    if vad_metadata:
-                        logger.debug(f"📊 VAD Metadata: inference_time={vad_metadata.get('inference_time_ms', 0):.1f}ms, buffer_duration={vad_metadata.get('buffer_duration', 0):.1f}s")
-                    
-                    # Record for tuning
-                    self.vad_tuner.record_detection(
-                        was_correct=True,  # We'll validate this later
-                        confidence=confidence,
-                        latency_ms=vad_metadata.get("inference_time_ms", 0),
-                        audio_duration_ms=len(session["audio_buffer"]) / (sample_rate * 2) * 1000
-                    )
-                
-                # Restore original VAD threshold
-                # Threshold is already fixed at the configured value (no reset needed)
-                
-                if is_turn_end:
-                    logger.info(f"🎯 Turn end detected! Confidence: {confidence:.2f}")
+                if should_transcribe:
+                    logger.info(f"🎯 Whisper VAD - Processing {buffer_duration:.1f}s of audio")
                     session["turn_count"] += 1
                     
-                    # Process the complete utterance
+                    # Process with Whisper's built-in VAD
                     await self.process_complete_utterance(
                         websocket, session["audio_buffer"], 
                         sample_rate, client_id, trace_id
                     )
                     
-                    # Clear buffer for next turn
+                    # Clear buffer for next utterance
                     session["audio_buffer"] = bytearray()
-                else:
-                    # Send intermediate status
-                    await self.send_vad_status(websocket, False, confidence, vad_metadata)
+                
             else:
-                # Not enough audio yet
-                buffer_duration = len(session["audio_buffer"]) / (sample_rate * 2)
-                await self.send_vad_status(websocket, False, 0.0, {
-                    "waiting": True,
-                    "buffer_duration": buffer_duration,
-                    "min_required": self.vad.min_audio_length
-                })
+                # Original Smart Turn VAD logic
+                with MetricsContext(trace_id, "vad", "buffer_processing", 
+                                  audio_rms_db=audio_levels['rms_db'], 
+                                  audio_peak_db=audio_levels['peak_db'],
+                                  audio_duration_ms=audio_levels['duration_ms']) as ctx:
+                    buffer_ready = self.vad.add_audio_chunk(audio_data)
+                
+                # Check for turn end if buffer is ready
+                if buffer_ready:
+                    with MetricsContext(trace_id, "vad", "inference") as vad_ctx:
+                        is_turn_end, confidence, vad_metadata = await self.vad.detect_turn_end()
+                        
+                        logger.info(f"🎯 Smart Turn VAD - Turn End: {'YES' if is_turn_end else 'NO'}, Confidence: {confidence:.2f}")
+                        
+                        if is_turn_end:
+                            session["turn_count"] += 1
+                            
+                            # Process the complete utterance
+                            await self.process_complete_utterance(
+                                websocket, session["audio_buffer"], 
+                                sample_rate, client_id, trace_id
+                            )
+                            
+                            # Clear buffer for next turn
+                            session["audio_buffer"] = bytearray()
             
             # Update last activity
             session["last_activity"] = time.time()
@@ -895,9 +876,8 @@ class EnhancedAudioWebSocketHandler:
                             action="add_text", text=text
                         )
                         if result.get("success"):
-                            return self.voice_commands.format_response(
-                                "text_added", text=text[:50]
-                            ) if self.voice_commands else f"📝 Added: {text[:50]}..."
+                            # More helpful response explaining the limitation
+                            return f"📝 Text displayed: '{text[:30]}...'. Copy and paste it to your terminal."
                         else:
                             return f"❌ Failed to add text: {result.get('error', 'Unknown error')}"
                     else:
@@ -1008,12 +988,28 @@ class EnhancedAudioWebSocketHandler:
                 else:
                     return "❌ Terminal integration not available"
                     
+            elif action == "show_capabilities":
+                return self._generate_capabilities_summary()
+                    
             else:
                 return f"❓ Unknown voice command action: {action}"
                 
         except Exception as e:
             logger.error(f"❌ Voice command error: {e}")
             return f"Error processing voice command: {e}"
+    
+    def _generate_capabilities_summary(self) -> str:
+        """Generate a summary of available voice capabilities"""
+        capabilities = [
+            "🎤 Voice Assistant Capabilities:",
+            "• Say 'Hi' or 'Hello' for current status",
+            "• Say 'Update' or 'Latest' for recent Claude responses", 
+            "• Say 'Run' + command to execute terminal commands",
+            "• Say 'Help' to hear this menu again",
+            "• Say 'Debug' for error analysis",
+            "• Say 'Status' for project overview"
+        ]
+        return " ".join(capabilities)
     
     async def synthesize_speech(self, text: str) -> Optional[bytes]:
         """Synthesize speech using TTS"""
@@ -1127,8 +1123,8 @@ class EnhancedAudioWebSocketHandler:
             "type": "session_started",
             "vad_config": {
                 "model": "smart-turn-v3",
-                "confidence_threshold": self.vad.confidence_threshold,
-                "min_audio_length": self.vad.min_audio_length
+                "confidence_threshold": self.vad.confidence_threshold if self.vad else "whisper_vad",
+                "min_audio_length": self.vad.min_audio_length if self.vad else "whisper_vad"
             },
             "timestamp": time.time()
         }
@@ -1299,10 +1295,16 @@ class EnhancedAudioWebSocketHandler:
     async def send_audio_quality_warning(self, websocket, audio_levels: dict):
         """Send warning about poor audio quality to client"""
         try:
+            # Convert numpy float32 values to regular Python floats for JSON serialization
+            levels_json = {
+                k: float(v) if isinstance(v, (np.float32, np.float64)) else v
+                for k, v in audio_levels.items()
+            }
+            
             warning_message = {
                 "type": "audio_quality_warning",
-                "levels": audio_levels,
-                "message": f"Audio too quiet ({audio_levels['rms_db']:.1f}dB). Please speak louder or check microphone.",
+                "levels": levels_json,
+                "message": f"Audio too quiet ({levels_json['rms_db']:.1f}dB). Please speak louder or check microphone.",
                 "suggestions": [
                     "Increase microphone volume",
                     "Move closer to microphone", 

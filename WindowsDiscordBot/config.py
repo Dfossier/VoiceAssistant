@@ -16,7 +16,7 @@ class Config:
     COMMAND_PREFIX = "!"
     
     # Backend API Settings  
-    BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:8000")
+    BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://10.2.0.2:8000")
     BACKEND_API_KEY = os.getenv("API_KEY")
     
     # Logging Settings

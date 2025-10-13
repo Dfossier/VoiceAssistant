@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = Field(None, env='GEMINI_API_KEY')
     
     # Server Configuration
-    server_host: str = Field('0.0.0.0', env='SERVER_HOST')
+    server_host: str = Field('127.0.0.1', env='SERVER_HOST')
     server_port: int = Field(8000, env='SERVER_PORT')
     server_reload: bool = Field(False, env='SERVER_RELOAD')
     server_log_level: str = Field('INFO', env='SERVER_LOG_LEVEL')
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     # Security
     secret_key: str = Field(..., env='SECRET_KEY')
-    allowed_origins: str = Field('http://localhost:8000', env='ALLOWED_ORIGINS')
+    allowed_origins: str = Field('http://127.0.0.1:8000,http://localhost:3000', env='ALLOWED_ORIGINS')
     auth_enabled: bool = Field(False, env='AUTH_ENABLED')
     auth_username: Optional[str] = Field(None, env='AUTH_USERNAME')
     auth_password: Optional[str] = Field(None, env='AUTH_PASSWORD')

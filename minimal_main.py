@@ -265,6 +265,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     "output": output
                 })
                 
+            elif message_type == "audio_input":
+                # Handle audio input from Discord bot
+                await websocket.send_json({
+                    "type": "audio_ack",
+                    "message": "Audio received (minimal server)"
+                })
+                logger.info("🎤 Received audio chunk from Discord bot (minimal server)")
+                
+            elif message_type == "start":
+                # Handle connection start
+                await websocket.send_json({
+                    "type": "started",
+                    "message": "Voice session started (minimal server)"
+                })
+                logger.info("🎤 Voice session started with Discord bot (minimal server)")
+                
             elif message_type == "voice":
                 action = data.get("action")
                 if action == "conversation":
@@ -384,10 +400,14 @@ def main():
     # Run server
     try:
     
+        # Use environment variable or default to 127.0.0.1 for WSL mirrored networking
+        host = os.getenv("SERVER_HOST", "127.0.0.1")
+        port = int(os.getenv("SERVER_PORT", "8888"))
+        
         uvicorn.run(
             app,
-            host="0.0.0.0",
-            port=8000,
+            host=host,
+            port=port,
             log_level="info"
         )
     except KeyboardInterrupt:

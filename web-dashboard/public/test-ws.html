@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Debug</title>
+</head>
+<body>
+    <h1>WebSocket Debug Test</h1>
+    <button onclick="testDirect()">Test Direct Connection (8000)</button>
+    <button onclick="testProxy()">Test Proxy Connection (3000)</button>
+    <pre id="log"></pre>
+    
+    <script>
+        const log = document.getElementById('log');
+        
+        function addLog(msg) {
+            log.textContent += msg + '\n';
+            console.log(msg);
+        }
+        
+        function testDirect() {
+            addLog('\n--- Testing direct connection to :8000 ---');
+            const ws = new WebSocket('ws://localhost:8000/api/system/ws/metrics');
+            
+            ws.onopen = () => addLog('Direct: Connected!');
+            ws.onerror = (e) => addLog('Direct: Error - ' + e);
+            ws.onclose = (e) => addLog(`Direct: Closed - code: ${e.code}, reason: ${e.reason}`);
+            ws.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                addLog(`Direct: Received ${data.type}`);
+            };
+        }
+        
+        function testProxy() {
+            addLog('\n--- Testing proxy connection through :3000 ---');
+            const ws = new WebSocket('ws://localhost:3000/api/system/ws/metrics');
+            
+            ws.onopen = () => addLog('Proxy: Connected!');
+            ws.onerror = (e) => addLog('Proxy: Error - ' + e);
+            ws.onclose = (e) => addLog(`Proxy: Closed - code: ${e.code}, reason: ${e.reason}`);
+            ws.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                addLog(`Proxy: Received ${data.type}`);
+            };
+        }
+    </script>
+</body>
+</html>

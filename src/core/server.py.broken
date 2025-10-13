@@ -1,0 +1,578 @@
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+command_executor = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        # Import local model manager first
+        from core.local_models import local_model_manager
+        
+        # Initialize local models with proper error handling
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """WebSocket endpoint for real-time communication"""
+            while True:
+                data = await websocket.receive_json()
+                
+                # Process different message types
+                message_type = data.get("type")
+                
+                if message_type == "chat":
+                    # Handle chat messages
+                    response = await handle_chat_message(data)
+                    await websocket.send_json(response)
+                    
+                elif message_type == "command":
+                    # Handle command execution
+                    response = await handle_command(data)
+                    await websocket.send_json(response)
+                    
+                elif message_type == "file_operation":
+                    # Handle file operations
+                    response = await handle_file_operation(data)
+                    await websocket.send_json(response)
+                    
+                elif message_type == "voice":
+                    # Handle voice chat requests
+                    response = await handle_voice_request(data)
+                    await websocket.send_json(response)
+                    
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Unknown message type: {message_type}"
+                    })
+                    
+        except WebSocketDisconnect:
+            ws_manager.disconnect(websocket)
+            logger.info("Client disconnected")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        message = data.get("message", "")
+        if not message:
+            return {
+                "type": "error",
+                "message": "No message provided"
+            }
+        
+        # Check for special commands
+        if message.startswith("/"):
+            return await handle_special_command(message)
+        
+        # Get available models
+        models = await llm_handler.get_available_models()
+        logger.info(f"Available models: {models}")
+        
+        # Generate response using LLM
+        response = await llm_handler.generate_response(
+            prompt=message,
+            system_prompt="You are a helpful AI assistant specialized in debugging and development. Provide concise, actionable responses."
+        )
+        
+        return {
+            "type": "chat_response",
+            "message": response,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling chat message: {e}")
+        return {
+            "type": "error", 
+            "message": f"Error processing message: {str(e)}"
+        }
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        command = data.get("command")
+        action = data.get("action")
+        working_dir = data.get("working_directory")
+        
+        if command:
+            # Execute custom command
+            result = await command_executor.execute_command(
+                command=command,
+                working_directory=working_dir,
+                timeout=60
+            )
+            
+            return {
+                "type": "command_response",
+                "output": result.stdout,
+                "error": result.stderr,
+                "return_code": result.return_code,
+                "execution_time": result.execution_time,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif action:
+            # Handle predefined actions
+            if action == "run_tests":
+                # Try common test commands
+                test_commands = ["pytest", "python -m pytest", "npm test", "make test"]
+                
+                for cmd in test_commands:
+                    if await command_executor.check_command_availability(cmd.split()[0]):
+                        result = await command_executor.execute_command(cmd, working_dir)
+                        return {
+                            "type": "command_response",
+                            "output": result.stdout,
+                            "error": result.stderr,
+                            "return_code": result.return_code,
+                            "timestamp": asyncio.get_event_loop().time()
+                        }
+                        
+                return {
+                    "type": "command_response", 
+                    "output": "No test framework detected",
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                
+            elif action == "check_logs":
+                # Find and analyze recent log files
+                error_files = await file_monitor.analyze_recent_errors()
+                if error_files:
+                    summary = f"Found {len(error_files)} files with errors:\n"
+                    for file_analysis in error_files[:5]:
+                        summary += f"- {file_analysis.path}: {len(file_analysis.error_lines)} errors\n"
+                else:
+                    summary = "No recent errors detected in monitored files"
+                    
+                return {
+                    "type": "command_response",
+                    "output": summary,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                
+            elif action == "browse_web":
+                return {
+                    "type": "command_response",
+                    "output": "Web browsing functionality coming soon",
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                
+        return {
+            "type": "error",
+            "message": "No valid command or action specified"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling command: {e}")
+        return {
+            "type": "error",
+            "message": f"Command execution error: {str(e)}"
+        }
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        operation = data.get("operation")
+        file_path = data.get("path")
+        
+        if operation == "read":
+            content = await file_monitor.get_file_content(file_path)
+            if content is not None:
+                return {
+                    "type": "file_response",
+                    "operation": "read",
+                    "path": file_path,
+                    "content": content[:5000],  # Limit content size
+                    "truncated": len(content) > 5000,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+            else:
+                return {
+                    "type": "error",
+                    "message": f"Could not read file: {file_path}"
+                }
+                
+        elif operation == "list":
+            # List recent file changes
+            changes = file_monitor.get_recent_changes(20)
+            file_list = []
+            
+            for change in changes:
+                file_list.append({
+                    "path": str(change.path),
+                    "event": change.event_type,
+                    "timestamp": change.timestamp.isoformat(),
+                    "is_directory": change.is_directory
+                })
+                
+            return {
+                "type": "file_response",
+                "operation": "list",
+                "files": file_list,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif operation == "analyze":
+            # Analyze file for errors
+            from pathlib import Path
+            from .file_monitor import CodeAnalyzer
+            
+            analysis = await CodeAnalyzer.analyze_file(Path(file_path))
+            if analysis:
+                return {
+                    "type": "file_response",
+                    "operation": "analyze", 
+                    "path": file_path,
+                    "file_type": analysis.file_type,
+                    "line_count": analysis.line_count,
+                    "has_errors": analysis.has_errors,
+                    "error_lines": analysis.error_lines,
+                    "size_bytes": analysis.size_bytes,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+            else:
+                return {
+                    "type": "error",
+                    "message": f"Could not analyze file: {file_path}"
+                }
+                
+        return {
+            "type": "error",
+            "message": f"Unknown file operation: {operation}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling file operation: {e}")
+        return {
+            "type": "error",
+            "message": f"File operation error: {str(e)}"
+        }
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        if command == "/help":
+            help_text = """Available commands:
+/help - Show this help message
+/status - Show system status
+/models - List available AI models
+/files - List recent file changes
+/processes - Show running processes
+/clear - Clear chat history (frontend only)"""
+            
+            return {
+                "type": "chat_response",
+                "message": help_text,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif command == "/status":
+            models = await llm_handler.get_available_models()
+            processes = await command_executor.get_running_processes()
+            changes = file_monitor.get_recent_changes(5)
+            
+            status = f"""System Status:
+• Available models: {len(models['api_models'])} API + {len(models['local_models'])} local
+• Running processes: {len(processes)}
+• Recent file changes: {len(changes)}
+• WebSocket connections: {ws_manager.get_connection_count()}"""
+            
+            return {
+                "type": "chat_response",
+                "message": status,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif command == "/models":
+            models = await llm_handler.get_available_models()
+            model_text = "Available AI Models:\n\nAPI Models:\n"
+            for model in models['api_models']:
+                model_text += f"• {model}\n"
+            model_text += "\nLocal Models:\n"
+            for model in models['local_models']:
+                model_text += f"• {model}\n"
+                
+            return {
+                "type": "chat_response", 
+                "message": model_text,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif command == "/files":
+            changes = file_monitor.get_recent_changes(10)
+            if changes:
+                files_text = "Recent file changes:\n"
+                for change in changes:
+                    files_text += f"• {change.event_type}: {change.path.name} ({change.timestamp.strftime('%H:%M:%S')})\n"
+            else:
+                files_text = "No recent file changes"
+                
+            return {
+                "type": "chat_response",
+                "message": files_text,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        elif command == "/processes":
+            processes = await command_executor.get_running_processes()
+            if processes:
+                proc_text = f"Running processes ({len(processes)}):\n"
+                for proc in processes:
+                    runtime = (datetime.now() - proc.start_time).total_seconds()
+                    proc_text += f"• PID {proc.pid}: {proc.command[:50]}... ({runtime:.1f}s)\n"
+            else:
+                proc_text = "No running processes"
+                
+            return {
+                "type": "chat_response",
+                "message": proc_text,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
+        else:
+            return {
+                "type": "error",
+                "message": f"Unknown command: {command}. Type /help for available commands."
+            }
+            
+    except Exception as e:
+        logger.error(f"Error handling special command {command}: {e}")
+        return {
+            "type": "error", 
+            "message": f"Command error: {str(e)}"
+        }
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+        action = data.get("action")
+        text = data.get("text")
+        audio = data.get("audio")
+        
+        if action == "transcribe" and audio:
+            # Real audio transcription
+        @asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+            await local_model_manager.initialize()
+            logger.info("✅ Local model manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize local models: {e}")
+            # Continue without local models
+                # Try local Whisper installation first
+                from .local_whisper import LocalWhisperHandler
+                
+                local_whisper = LocalWhisperHandler()
+                result = await local_whisper.transcribe_audio(audio)
+                
+                # If that fails, try simple speech recognition
+                if not result.get("success", False):
+                @asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+            await local_model_manager.initialize()
+            logger.info("✅ Local model manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize local models: {e}")
+            # Continue without local models
+                        from .simple_speech import SimpleSpeechHandler
+                        speech_handler = SimpleSpeechHandler()
+                        result = await speech_handler.transcribe_audio(audio)
+                    except ImportError:
+    try:
+        from ..utils.websocket_manager import WebSocketManager
+    except ImportError:
+        from src.utils.websocket_manager import WebSocketManager
+                        pass
+                
+                if result["success"]:
+                    # Process the transcribed text
+                    text = result["text"]
+                    response = await llm_handler.generate_response(
+                        prompt=text,
+                        system_prompt="You are in a voice conversation. Keep responses brief and conversational."
+                    )
+                    
+                    return {
+                        "type": "voice_response",
+                        "transcribed_text": text,
+                        "text": response,
+                        "timestamp": asyncio.get_event_loop().time()
+                    }
+                else:
+                    return {
+                        "type": "error",
+                        "message": f"Transcription failed: {result.get('error', 'Unknown error')}"
+                    }
+                    
+            except ImportError:
+    try:
+        from ..utils.websocket_manager import WebSocketManager
+    except ImportError:
+        from src.utils.websocket_manager import WebSocketManager
+                return {
+                    "type": "error",
+                    "message": "Whisper not installed. Run: pip install openai-whisper"
+                }
+                
+        elif action == "process" and text:
+            # Process voice input text
+        @asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle"""
+    global llm_handler, file_monitor, command_executor
+    
+    logger.info("Starting up Local AI Assistant...")
+    
+    # Get settings from app state
+    settings = app.state.settings
+    
+    # Initialize components
+    try:
+            await local_model_manager.initialize()
+            logger.info("✅ Local model manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize local models: {e}")
+            # Continue without local models
+                from .browser_voice import BrowserVoiceHandler
+                
+                # Create voice handler
+                voice_handler = BrowserVoiceHandler(llm_handler)
+                
+                # Process the voice input
+                response = await voice_handler.process_voice_input(text)
+                return response
+                
+            except ImportError:
+    try:
+        from ..utils.websocket_manager import WebSocketManager
+    except ImportError:
+        from src.utils.websocket_manager import WebSocketManager
+                # Fallback to regular text processing
+                response = await llm_handler.generate_response(
+                    prompt=text,
+                    system_prompt="You are in a voice conversation. Keep responses brief and conversational."
+                )
+                
+                return {
+                    "type": "voice_response",
+                    "text": response,
+                    "audio": None,
+                    "has_audio": False,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+                
+        elif action == "start":
+            return {
+                "type": "voice_response",
+                "status": "browser_mode",
+                "mode": "browser",
+                "message": "🎤 Browser voice chat ready! Click the microphone button to speak."
+            }
+            
+        elif action == "stop":
+            return {
+                "type": "voice_response",
+                "status": "stopped",
+                "message": "Voice chat stopped"
+            }
+            
+        elif action == "status":
+            return {
+                "type": "voice_response",
+                "status": "available",
+                "features": {
+                    "browser_speech_api": True,
+                    "text_to_speech": TTS_AVAILABLE if 'TTS_AVAILABLE' in globals() else False,
+                }
+            }
+            
+        return {
+            "type": "error",
+            "message": f"Unknown voice action: {action}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling voice request: {e}")
+        return {
+            "type": "error",
+            "message": f"Voice request error: {str(e)}"
+        }
+

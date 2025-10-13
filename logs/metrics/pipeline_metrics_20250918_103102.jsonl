@@ -1,0 +1,2 @@
+{"timestamp": "2025-09-18T10:31:14.619907", "trace_id": "172.20.104.13:37766_1758209474.6190178", "total_duration_ms": 0.8733272552490234, "events": [], "metadata": {"client_id": "172.20.104.13:37766", "message_type": "ping"}}
+{"timestamp": "2025-09-18T10:51:34.742041", "trace_id": "172.20.104.13:50858_1758210694.7409532", "total_duration_ms": 1.0733604431152344, "events": [], "metadata": {"client_id": "172.20.104.13:50858", "message_type": "audio_format"}}

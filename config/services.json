@@ -1,0 +1,46 @@
+{
+  "websocket_service": {
+    "host": "0.0.0.0",
+    "port": 8002,
+    "url": "ws://127.0.0.1:8002",
+    "startup_timeout": 60,
+    "health_check_interval": 5,
+    "models": {
+      "stt": "Faster-Whisper Small",
+      "llm": "SmolLM2-1.7B", 
+      "tts": "Kokoro-312M"
+    }
+  },
+  "discord_bot": {
+    "audio_capture": {
+      "sample_rate": 16000,
+      "channels": 1,
+      "local_device": null,
+      "remote_device": null
+    },
+    "connection": {
+      "retry_count": 10,
+      "retry_delay": 3,
+      "initial_delay": 5
+    },
+    "hybrid_mode": {
+      "enabled": true,
+      "auto_detect": true,
+      "mode_switch_cooldown": 2.0,
+      "echo_prevention": {
+        "correlation_threshold": 0.75,
+        "timing_gate_multiplier": 1.2,
+        "tts_window_seconds": 5.0
+      }
+    }
+  },
+  "paths": {
+    "models": "/mnt/c/users/dfoss/desktop/localaimodels",
+    "logs": {
+      "websocket": "websocket_service.log",
+      "discord": "WindowsDiscordBot/discord_bot_windows.log",
+      "hybrid_discord": "WindowsDiscordBot/hybrid_discord_bot.log",
+      "backend": "minimal_server.log"
+    }
+  }
+}

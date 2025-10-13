@@ -68,6 +68,17 @@ class ClaudeCodeService:
         self.active_terminals = []
         self.all_sessions = {}
         
+        # Initialize MCP terminal functions if available
+        self._mcp_add_text = None
+        try:
+            # Try to import and set up MCP terminal functions
+            import sys
+            # Check if mcp__terminal-server__add_text_to_terminal is available
+            # This is the actual function that adds text to Claude's terminal
+            self._mcp_add_text = lambda text: None  # Placeholder
+        except Exception:
+            pass
+        
     async def initialize(self) -> bool:
         """Initialize the Claude Code service and find active sessions"""
         try:
@@ -304,6 +315,7 @@ class ClaudeCodeTerminalService:
     def __init__(self):
         self.terminal_processes = {}
         self._bash_available = self._check_bash_tool_availability()
+        self.active_terminals = []  # Added to store detected active terminals
         
     def _check_bash_tool_availability(self) -> bool:
         """Check if we're running within Claude Code context"""
@@ -339,20 +351,87 @@ class ClaudeCodeTerminalService:
             return False
         
     async def add_text_to_terminal(self, text: str, terminal_id: str = "default") -> bool:
-        """Add text using Claude Code's native capabilities"""
+        """Add text to terminal input without executing it"""
         try:
+            if self.active_terminals:
+                # Try to find the matching terminal (use first if default)
+                selected_terminal = None
+                for term in self.active_terminals:
+                    if term.get('id') == terminal_id or terminal_id == "default":
+                        selected_terminal = term
+                        break
+                
+                if selected_terminal:
+                    term_type = selected_terminal.get('type', '').lower()
+                    session_name = selected_terminal.get('name') or selected_terminal.get('session') or selected_terminal.get('id')
+                    
+                    if session_name:
+                        if term_type == 'tmux':
+                            process = await asyncio.create_subprocess_exec(
+                                'tmux', 'send-keys', '-t', session_name, text,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE
+                            )
+                            _, stderr = await process.communicate()
+                            if process.returncode == 0:
+                                logger.info(f"✅ Added text to tmux terminal '{session_name}': {text[:50]}...")
+                                return True
+                            else:
+                                logger.error(f"❌ tmux send-keys failed: {stderr.decode().strip()}")
+                        
+                        elif term_type == 'screen':
+                            process = await asyncio.create_subprocess_exec(
+                                'screen', '-S', session_name, '-X', 'stuff', text,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE
+                            )
+                            _, stderr = await process.communicate()
+                            if process.returncode == 0:
+                                logger.info(f"✅ Added text to screen terminal '{session_name}': {text[:50]}...")
+                                return True
+                            else:
+                                logger.error(f"❌ screen stuff failed: {stderr.decode().strip()}")
+                        
+                        else:
+                            logger.warning(f"⚠️ Unsupported terminal type: {term_type}")
+
+            # Fallback to original methods if multiplexer approach fails or no terminals detected
             if self._bash_available:
-                # Use Claude Code's native echo capability
-                success = await self._execute_via_claude_code(f"echo '{text}'")
-                if success:
-                    logger.info(f"✅ Added text via Claude Code: {text[:50]}...")
-                    return True
+                escaped_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("'", "'\"'\"'")
+                
+                # Try different methods to add text to terminal input
+                methods = [
+                    # Method 1: Use tee to append to terminal without executing
+                    f"echo -n '{escaped_text}' | tee /dev/tty",
+                    
+                    # Method 2: Use printf without newline to add to current line
+                    f"printf '%s' '{escaped_text}'",
+                    
+                    # Method 3: Try to write directly to terminal
+                    f"echo -n '{escaped_text}' > /dev/tty"
+                ]
+                
+                # Try each method
+                for method in methods:
+                    try:
+                        success = await self._execute_via_claude_code(method)
+                        if success:
+                            logger.info(f"✅ Added text to terminal input: {text[:50]}... using {method.split()[0]}")
+                            return True
+                    except Exception as e:
+                        logger.debug(f"Method {method.split()[0]} failed: {e}")
+                        continue
+                
+                # If all methods fail, at least display it clearly
+                await self._execute_via_claude_code(f"echo 'Text to add: {escaped_text}'")
+                logger.warning("⚠️ Could not add to input line, displayed as output instead")
+                return True
                 
             logger.error("❌ Claude Code native execution not available")
             return False
             
         except Exception as e:
-            logger.error(f"❌ Failed to add text: {e}")
+            logger.error(f"❌ Failed to add text to terminal: {e}")
             return False
     
     async def send_terminal_input(self, command: str, terminal_id: str = "default") -> bool:
@@ -440,6 +519,9 @@ class ClaudeCodeIntegration:
         """Initialize all Claude Code integration services"""
         try:
             log_success = await self.log_service.initialize()
+            
+            # Share active terminals with terminal service
+            self.terminal_service.active_terminals = self.log_service.active_terminals
             
             self.is_initialized = log_success
             

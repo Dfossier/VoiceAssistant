@@ -19,22 +19,22 @@
     ],
     "terminal_commands": [
       {
-        "trigger": ["run command", "execute", "run in terminal"],
+        "trigger": ["run command", "execute", "run in terminal", "run", "execute command", "terminal command", "command"],
         "action": "send_command",
         "description": "Execute a command in Claude Code terminal"
       },
       {
-        "trigger": ["type in terminal", "add text", "write in terminal"],
+        "trigger": ["type in terminal", "add text", "write in terminal", "type", "write", "add", "input"],
         "action": "add_text",
         "description": "Add text to Claude Code terminal without executing"
       },
       {
-        "trigger": ["press enter", "send", "execute that", "run that"],
+        "trigger": ["press enter", "send", "execute that", "run that", "enter", "go", "submit"],
         "action": "press_enter",
         "description": "Press Enter to execute the current terminal input"
       },
       {
-        "trigger": ["show terminal", "terminal output", "what's in terminal"],
+        "trigger": ["show terminal", "terminal output", "what's in terminal", "output", "show output", "terminal"],
         "action": "get_output",
         "description": "Get recent terminal output"
       }
@@ -85,24 +85,36 @@
     ],
     "claude_summary": [
       {
-        "trigger": ["give me an update", "give me the update", "what's the update"],
+        "trigger": ["give me an update", "give me the update", "what's the update", "update", "status update", "latest"],
         "action": "claude_latest_response",
         "description": "Get Claude's latest response without code context"
       },
       {
-        "trigger": ["what's the latest", "what is the latest", "latest update"],
+        "trigger": ["what's the latest", "what is the latest", "latest update", "what's new", "any updates"],
         "action": "claude_latest_response",
         "description": "Get Claude's most recent text response"
       },
       {
-        "trigger": ["what did claude say", "what claude said", "claude's response"],
+        "trigger": ["what did claude say", "what claude said", "claude's response", "what was said", "claude response"],
         "action": "claude_latest_response",
         "description": "Retrieve Claude's last message text only"
       },
       {
-        "trigger": ["where are we", "current status", "where we at"],
+        "trigger": ["where are we", "current status", "where we at", "status", "progress", "what's happening"],
         "action": "claude_conversation_summary",
         "description": "Get a summary of the current conversation context"
+      }
+    ],
+    "conversation_starters": [
+      {
+        "trigger": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"],
+        "action": "claude_conversation_summary", 
+        "description": "Friendly greeting with current status"
+      },
+      {
+        "trigger": ["help", "what can you do", "commands", "help me"],
+        "action": "show_capabilities",
+        "description": "Show available voice commands and capabilities"
       }
     ]
   },

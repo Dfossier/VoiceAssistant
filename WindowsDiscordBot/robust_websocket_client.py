@@ -42,8 +42,8 @@ class RobustWebSocketClient:
                 self.websocket = await asyncio.wait_for(
                     websockets.connect(
                         self.url,
-                        ping_interval=20,      # Keep connection alive
-                        ping_timeout=10,       # Ping response timeout
+                        ping_interval=20,      # More frequent pings for stability
+                        ping_timeout=120,      # Longer timeout for slow processing
                         close_timeout=10,      # Close handshake timeout
                         max_size=2**20,        # 1MB max message size
                         compression=None       # Disable compression for audio
@@ -155,8 +155,8 @@ class RobustWebSocketClient:
             self.websocket = await asyncio.wait_for(
                 websockets.connect(
                     self.url,
-                    ping_interval=20,
-                    ping_timeout=10,
+                    ping_interval=30,      # Match server ping settings
+                    ping_timeout=60,       # Match server ping settings
                     close_timeout=10,
                     max_size=2**20,
                     compression=None

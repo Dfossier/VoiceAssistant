@@ -1,88 +1,57 @@
-# Environment and credentials
-.env
-*.env
-gitpassword.env
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-venv/
-env/
-ENV/
-venv_*/
-bot_venv_windows/
-venv_wsl/
-
-# Logs and temporary files
+# Logs
+logs/*.log
 *.log
-*.pid
+
+# Cache and temp
+__pycache__/
+*.pyc
+*.pyo
 temp/
-cache/
-data/
+.cache/
 
-# Audio test files
-*.wav
-*.mp3
-*.m4a
-
-# Archive directory (debugging artifacts)
-archive/
-
-# Static files (unless needed)
-static/uploads/
-static/vendor/
+# Environment and secrets
+.env
+config/env/*.env
+*.key
+*.pem
+venv_wsl/
+venv/
+temp/
+old_files/
 
 # OS files
 .DS_Store
 Thumbs.db
-*.swp
-*.swo
-*~
+~WRL0003.tmp
+=0.9.2
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
 
 # IDE files
 .vscode/
 .idea/
-*.sublime-*
-
-# Model files (large)
-*.pth
-*.pt
-*.onnx
-*.gguf
-*.nemo
-*.bin
-models/
-
-# Windows specific
-*.lnk
-desktop.ini
-~$*
+*.swp
+*.swo
 
 # Test outputs
 test_*.wav
-debug_*.wav
-websocket_*.wav
-kokoro_*.wav
+*_test.json
+examples/test_*.*
+examples/*test.*
+
+# Audio and video test files
+*.wav
+assets/audio/test_*.wav
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Model files (if large)
+models/
+models/*.bin
+models/*.gguf

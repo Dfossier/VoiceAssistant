@@ -16,7 +16,7 @@ class VADConfig:
     
     # Smart Turn VAD parameters
     confidence_threshold: float = 0.7  # Lowered from 0.8 to reduce cutoffs
-    min_audio_length: float = 0.3      # Lowered from 0.5s for faster response
+    min_audio_length: float = 0.5      # Fast response for real-time conversation
     max_audio_length: float = 8.0      # Maximum audio to analyze
     
     # Turn detection sensitivity
@@ -212,9 +212,9 @@ class VADTuner:
         # Update metrics
         self._update_metrics()
         
-        # Auto-tune if needed
-        if len(self.performance_history) >= 20:
-            self._auto_tune()
+        # Auto-tune disabled - was causing speech fragmentation
+        # if len(self.performance_history) >= 20:
+        #     self._auto_tune()
     
     def _update_metrics(self):
         """Update performance metrics"""

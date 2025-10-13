@@ -22,6 +22,10 @@ import numpy as np
 sys.path.append(str(Path(__file__).parent))
 from config import Config
 from robust_websocket_client import RobustWebSocketClient
+try:
+    from load_config import config as services_config
+except ImportError:
+    services_config = {}
 
 # Ensure logs directory exists
 log_dir = Path(__file__).parent / "logs"
@@ -47,7 +51,10 @@ for log_name in ['discord', 'discord.gateway', 'discord.client', 'discord.voice_
 class DirectAudioCapture:
     """Direct microphone capture bypassing Discord Opus"""
     
-    def __init__(self, websocket_url="ws://172.20.104.13:8002"):
+    def __init__(self, websocket_url=None):
+        # Use centralized config or fallback
+        if websocket_url is None:
+            websocket_url = services_config.get('websocket_url', 'ws://127.0.0.1:8002')
         self.websocket_url = websocket_url
         self.websocket_client = RobustWebSocketClient(websocket_url, self._handle_websocket_message)
         self.is_capturing = False
@@ -523,6 +530,12 @@ class DirectAudioBot(discord.Client):
             
             # Set the active voice client reference for audio playback
             self.audio_capture.active_voice_client = voice_client
+            
+            # Wait for services to be ready if config available
+            if services_config:
+                initial_delay = services_config.get('connection', {}).get('initial_delay', 5)
+                logger.info(f"⏳ Waiting {initial_delay}s for services to initialize...")
+                await asyncio.sleep(initial_delay)
             
             # Connect to backend
             if not await self.audio_capture.connect():

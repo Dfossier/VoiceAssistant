@@ -130,15 +130,17 @@ class LocalModelManager:
                 model_cache_dir.mkdir(parents=True, exist_ok=True)
                 
                 self._faster_whisper_model = WhisperModel(
-                    "small",  # Use small model for better accuracy (still fast on GPU)
+                    "small.en",   # Use small model for better accuracy
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     compute_type="float16" if torch.cuda.is_available() else "int8",
-                    # Performance optimizations
-                    num_workers=1,          # Single worker for lower latency
+                    # Performance optimizations with CUDA acceleration
+                    num_workers=2 if torch.cuda.is_available() else 1,  # More workers for GPU
                     download_root=str(model_cache_dir),  # Local cache to avoid re-downloads
                     local_files_only=False  # Allow downloads but cache locally
                 )
-                logger.info("✅ Faster-Whisper Small model loaded with optimizations")
+                
+                device_info = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
+                logger.info(f"✅ Faster-Whisper Small model loaded with {device_info} acceleration")
                 
                 # Model warming: Run a small test transcription to initialize GPU kernels
                 await self._warm_whisper_model()
@@ -366,17 +368,17 @@ class LocalModelManager:
             if model_files:
                 logger.info(f"Found Kokoro TTS model files: {[f.name for f in model_files[:3]]}")
                 
-                # Eagerly initialize the Kokoro TTS service if requested
+                # Eagerly initialize the Kokoro TTS service for fast synthesis
                 if self.eager_load and not os.environ.get('DISABLE_KOKORO'):
                     try:
-                        # Apply phonemizer fix BEFORE importing Kokoro
+                        # Apply phonemizer fix BEFORE importing Kokoro service
                         from .phonemizer_fix import apply_phonemizer_fix
                         apply_phonemizer_fix()
                         
                         from .kokoro_tts_service import KokoroTTSService
                         logger.info("🔄 Initializing Kokoro TTS service...")
                         
-                        self._kokoro_service = KokoroTTSService(kokoro_path)
+                        self._kokoro_service = KokoroTTSService(kokoro_path, eager_init=True)
                         tts_initialized = await self._kokoro_service.initialize()
                         
                         if tts_initialized:
@@ -440,35 +442,34 @@ class LocalModelManager:
                 if self.eager_load:
                     logger.warning("❌ Faster-Whisper model was supposed to be loaded at startup but is missing")
                 
-                logger.info("Loading Faster-Whisper Small model for better accuracy...")
+                logger.info("Loading Faster-Whisper Small model with CUDA acceleration...")
                 # Use same optimized configuration as startup
                 model_cache_dir = Path("./models/faster-whisper")
                 model_cache_dir.mkdir(parents=True, exist_ok=True)
                 
                 self._faster_whisper_model = WhisperModel(
-                    "small",
+                    "small.en",             # Use small model for better accuracy
                     device="cuda" if torch.cuda.is_available() else "cpu",
                     compute_type="float16" if torch.cuda.is_available() else "int8",
-                    num_workers=1,
+                    num_workers=2 if torch.cuda.is_available() else 1,  # More workers for GPU
                     download_root=str(model_cache_dir),
                     local_files_only=False
                 )
-                logger.info("✅ Faster-Whisper Small model loaded with optimizations")
+                
+                device_info = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
+                logger.info(f"✅ Faster-Whisper Small model loaded with {device_info} acceleration")
             
-            # Transcribe with Faster-Whisper using performance optimizations
+            # Transcribe with Faster-Whisper using real-time optimizations
             segments, info = self._faster_whisper_model.transcribe(
                 audio_array, 
                 language="en",
-                # Performance optimizations for 40% speed improvement
-                beam_size=1,           # Faster beam search (vs default 5)
-                best_of=1,             # Single pass (vs default 5)  
-                temperature=0.0,       # Deterministic output for consistency
-                vad_filter=True,       # Preprocessing VAD filter for efficiency
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,  # Skip short silences
-                    threshold=0.5,                 # VAD sensitivity
-                    max_speech_duration_s=30      # Limit long audio segments
-                )
+                # Aggressive real-time optimizations
+                beam_size=1,           # Fastest beam search
+                best_of=1,             # Single pass only  
+                temperature=0.0,       # Deterministic output
+                vad_filter=False,      # Disable VAD - we handle chunking
+                without_timestamps=True,  # Skip timestamp computation for speed
+                word_timestamps=False     # Skip word-level timestamps
             )
             text = " ".join([segment.text for segment in segments]).strip()
             logger.info(f"✅ Faster-Whisper transcribed: {text}")
@@ -686,20 +687,9 @@ class LocalModelManager:
             # Re-enable Kokoro with debugging
             use_kokoro = True
             
-            if use_kokoro:
-                # Try to use the new Kokoro wrapper that bypasses espeak issues
-                if os.environ.get('DISABLE_KOKORO'):
-                    logger.warning("⚠️ Kokoro disabled, using fallback TTS")
-                    return None
-                    
+            if use_kokoro and self._kokoro_service:
+                # Use the eagerly loaded Kokoro service for fastest synthesis
                 try:
-                    # Use the new integration that handles espeak issues
-                    from .kokoro_integration import create_kokoro_tts_integration
-                    
-                    if not hasattr(self, '_kokoro_integration') or self._kokoro_integration is None:
-                        logger.info("🔧 Initializing Kokoro TTS integration...")
-                        self._kokoro_integration = create_kokoro_tts_integration()
-                    
                     # Map voice config to Kokoro voice names
                     voice_map = {
                         'default': 'af_heart',
@@ -708,28 +698,17 @@ class LocalModelManager:
                     }
                     kokoro_voice = voice_map.get(voice, 'af_heart')
                     
-                    # Synthesize with new wrapper - handle different return formats
-                    result = await self._kokoro_integration.synthesize(text, voice=kokoro_voice)
-                    
-                    # Handle different return formats
-                    if isinstance(result, tuple) and len(result) == 2:
-                        audio_data, sample_rate = result
-                    elif isinstance(result, bytes):
-                        audio_data, sample_rate = result, 24000
-                    else:
-                        audio_data, sample_rate = None, 24000
+                    # Fast synthesis using pre-initialized service
+                    audio_data = await self._kokoro_service.synthesize(text, voice=kokoro_voice)
                     
                     if audio_data and len(audio_data) > 0:
-                        logger.info(f"✅ Kokoro TTS generated {len(audio_data)} bytes at {sample_rate}Hz")
+                        logger.info(f"🚀 Fast Kokoro TTS: {len(audio_data)} bytes")
                         return audio_data
                     else:
-                        logger.warning("⚠️ Kokoro TTS returned empty audio, trying fallback...")
+                        logger.warning("⚠️ Kokoro TTS returned empty audio")
                         
-                except ImportError as e:
-                    logger.warning(f"❌ Kokoro TTS not available: {e}")
-                    logger.info("💡 Install with: pip install kokoro>=0.9.2")
                 except Exception as e:
-                    logger.error(f"❌ Kokoro TTS failed: {e}")
+                    logger.error(f"❌ Fast Kokoro TTS failed: {e}")
                 
             # If Kokoro fails, try fallback TTS
             try:

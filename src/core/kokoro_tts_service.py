@@ -22,7 +22,7 @@ class KokoroTTSService:
         self._use_low_level_api = False
         self._initialized = False
         
-        # Eagerly initialize if requested
+        # Disable eager initialization by default to prevent redundant inits
         if eager_init:
             self._eager_initialize()
     
@@ -59,14 +59,14 @@ class KokoroTTSService:
             logger.error("❌ Eager Kokoro TTS initialization failed")
         
     async def initialize(self):
-        """Initialize the Kokoro TTS pipeline"""
+        """Initialize the Kokoro TTS pipeline with essential compatibility fixes"""
         if self._initialized:
             return True
             
         try:
-            logger.info("🔧 Initializing Kokoro TTS...")
+            logger.info("🚀 Fast Kokoro TTS initialization...")
             
-            # Apply phonemizer compatibility fix BEFORE any kokoro imports
+            # Apply essential phonemizer compatibility fix BEFORE importing Kokoro
             try:
                 from phonemizer.backend.espeak.wrapper import EspeakWrapper
                 if not hasattr(EspeakWrapper, 'set_data_path'):
@@ -81,7 +81,7 @@ class KokoroTTSService:
             except Exception as e:
                 logger.warning(f"Could not apply phonemizer fix: {e}")
                 
-            # Now import kokoro after the fix is applied
+            # Import Kokoro after the fix is applied
             try:
                 from kokoro import KPipeline
                 logger.info("✅ Kokoro package found")
@@ -89,55 +89,24 @@ class KokoroTTSService:
                 logger.error("❌ Kokoro package not installed. Install with: pip install kokoro>=0.9.2")
                 return False
                 
-            # Try to initialize with proper error handling for espeak issues
+            # Initialize with minimal configuration for speed
             try:
-                # Create the pipeline with English language code
-                # Try different initialization approaches
-                import os
-                
                 # Set environment variables that might help with espeak
+                import os
                 os.environ.setdefault('ESPEAK_DATA_PATH', '/usr/share/espeak-ng-data')
                 
-                # Initialize with minimal configuration
-                # Note: KPipeline may not take model_dir parameter directly
-                self._pipeline = KPipeline(
-                    lang_code='a'  # 'a' is for American English in Kokoro
-                )
-                
-                logger.info("✅ Kokoro TTS pipeline initialized with KPipeline")
-                
-            except Exception as pipeline_error:
-                logger.warning(f"KPipeline failed: {pipeline_error}")
-                logger.info("Trying alternative Kokoro initialization...")
-                
-                # Try a more direct approach if available
-                try:
-                    # Alternative: try importing the lower-level components
-                    from kokoro.models import KokoroModel
-                    from kokoro.phonemize import phonemize_text
+                self._pipeline = KPipeline(lang_code='a')  # American English
+                logger.info("✅ Kokoro TTS pipeline initialized successfully")
                     
-                    # Use lower-level API if KPipeline fails
-                    model_file = self.model_path / "kokoro-v1_0.pth"
-                    if model_file.exists():
-                        self._model = KokoroModel.from_pretrained(str(model_file))
-                        self._use_low_level_api = True
-                        logger.info("✅ Kokoro TTS initialized with low-level API")
-                    else:
-                        logger.error(f"❌ Model file not found: {model_file}")
-                        return False
-                        
-                except ImportError:
-                    logger.error("❌ Cannot access Kokoro low-level API")
-                    return False
+            except Exception as e:
+                logger.error(f"❌ Kokoro initialization failed: {e}")
+                return False
                     
             self._initialized = True
-            logger.info("✅ Kokoro TTS pipeline initialized successfully")
             return True
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize Kokoro TTS: {e}")
-            import traceback
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
             return False
             
     async def synthesize(self, text: str, voice: str = 'af_heart') -> Optional[bytes]:
